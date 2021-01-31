@@ -75,8 +75,8 @@ def bboxes_fusion(img_shape, img_bbox_df):
 def processing_case(img_info_dict):
     train_dcm_dir = img_info_dict["train_dcm_dir"]
     save_base_dir = img_info_dict["save_base_dir"]
-    npz_dir = os.path.join(save_base_dir, img_info_dict=["npz_dirname"])
-    bbox_dir = os.path.join(save_base_dir, img_info_dict=["txt_dirname"])
+    npz_dir = os.path.join(save_base_dir, img_info_dict["npz_dirname"])
+    bbox_dir = os.path.join(save_base_dir, img_info_dict["txt_dirname"])
 
     img_id = img_info_dict["img_id"]
     img_bbox_df = img_info_dict["img_df"]
@@ -118,9 +118,9 @@ def main(args):
     os.makedirs(os.path.join(args.save_base_dir, txt_dirname), exist_ok=True)
 
     print("Now running preprocessing part")
-    with multiprocessing.pool(args.workers) as pool:
+    with multiprocessing.Pool(args.workers) as pool:
         gen = pool.imap(processing_case, info_dict_list)
-        for _ in tqdm.tqdm(gen):
+        for _ in tqdm.tqdm(gen, total=len(info_dict_list)):
             pass
 
 
