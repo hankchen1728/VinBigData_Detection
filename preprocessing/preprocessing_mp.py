@@ -44,6 +44,8 @@ def bboxes_fusion(img_shape, img_bbox_df):
     fused_id = []
 
     for c_id in class_id_cnt.keys():
+        if c_id == 14:
+            continue
         if class_id_cnt[c_id] == 1:  # only one bboxes
             selected_bbox = np.array(orig_bboxes[class_ids == c_id])
             # nothing to do with only single bbox
@@ -65,9 +67,12 @@ def bboxes_fusion(img_shape, img_bbox_df):
             fused_bboxes.append(wbf_boxes)
             fused_id.append(labels)
 
+    if len(fused_bboxes) == 0:
+        return fused_bboxes
+
     # Concate the bboxes together and save to txt file
     fused_bboxes = np.concatenate(fused_bboxes)
-    fused_id = np.concatenate(fused_id)
+    fused_id = np.concatenate(fused_id).astype(np.int)
     fused_labels = np.hstack([np.expand_dims(fused_id, -1), fused_bboxes])
     return fused_labels
 
@@ -89,10 +94,12 @@ def processing_case(img_info_dict):
     )
 
     fused_labels = bboxes_fusion(img_shape, img_bbox_df)
+    txt_fpath = os.path.join(bbox_dir, img_id + ".txt")
+    save_fmt = "%d" + " %.7f" * 4 if len(fused_labels) > 0 else "%d"
     np.savetxt(
-        fname=os.path.join(bbox_dir, img_id + ".txt"),
+        fname=txt_fpath,
         X=fused_labels,
-        fmt="%.7f"
+        fmt=save_fmt
     )
     # end
 
