@@ -15,6 +15,9 @@ def read_xray(
     normalization=False
 ) -> np.ndarray:
     dicom = pydicom.read_file(dcm_path)
+    # For ignoring the UserWarning: "Bits Stored" value (14-bit)...
+    elem = dicom[0x0028, 0x0101]
+    elem.value = 16
 
     # VOI LUT (if available by DICOM device) is used to transform raw DICOM
     # data to "human-friendly" view
