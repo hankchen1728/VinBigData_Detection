@@ -17,8 +17,8 @@ and bounding box `*.txt` file will be in `$SAVE_BASE_DIR/bbox_txt`
 ### Bounding Boxes in `txt` files
 The `*.txt` file specifications are:
 - One row per object
-- Each row is `class x_center y_center width height` format
-- Box coordinates are in **normalized xywh** format (from 0 - 1). If your boxes are in pixels, divide `x_center` and `width` by image width, and `y_center` and `height` by image height.)  
+- Each row is `class x_min y_min x_max y_max` format
+- Box coordinates are in **normalized** format (from 0 - 1). If your boxes are in pixels, divide `x_min` and `x_max` by image width, and `y_min` and `y_max` by image height.)  
 For example,
 ![](./figures/YOLO_bbox_fmt.png)
 
