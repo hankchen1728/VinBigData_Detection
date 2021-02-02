@@ -1,0 +1,33 @@
+project_name: vinbigdata  # also the folder name of the dataset that under data_path folder
+image_dir: /work/VinBigData/preprocessed/img_npz
+annot_dir: /work/VinBigData/preprocessed/bbox_txt
+train_val_split: /work/VinBigData/preprocessed/train_val_split.json
+
+# mean and std in RGB order, actually this part should remain unchanged as long as your dataset is similar to coco.
+mean: [0]
+std: [1]
+
+# About model
+in_channels: 1
+# this is coco anchors, change it if necessary
+anchors_scales: '[2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]'
+anchors_ratios: '[(1.0, 1.0), (1.4, 0.7), (0.7, 1.4)]'
+
+# must match your dataset's category_id.
+# category_id is one_indexed,
+obj_list: [
+  "Aortic enlargement",
+  "Atelectasis",
+  "Calcification",
+  "Cardiomegaly",
+  "Consolidation",
+  "ILD",
+  "Infiltration",
+  "Lung Opacity",
+  "Nodule/Mass",
+  "Other lesion",
+  "Pleural effusion",
+  "Pleural thickening",
+  "Pneumothorax",
+  "Pulmonary fibrosis"
+]
