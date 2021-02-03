@@ -92,21 +92,7 @@ class VinBigDataset(Dataset):
             )
             # to [x1, y1, x2, y2, class_id]
             annot = np.roll(annot, shift=-1)
-
-        # for idx, a in enumerate(coco_annotations):
-
-        #     # some annotations have basically no width / height, skip them
-        #     if a['bbox'][2] < 1 or a['bbox'][3] < 1:
-        #         continue
-
-        #     annotation = np.zeros((1, 5))
-        #     annotation[0, :4] = a['bbox']
-        #     annotation[0, 4] = a['category_id'] - 1
-        #     annotations = np.append(annotations, annotation, axis=0)
-
-        # # transform from [x, y, w, h] to [x1, y1, x2, y2]
-        # annotations[:, 2] = annotations[:, 0] + annotations[:, 2]
-        # annotations[:, 3] = annotations[:, 1] + annotations[:, 3]
+            annot = annot.reshape((-1, 5))  # TODO
 
         return annot
 
@@ -144,7 +130,9 @@ class Resizer(object):
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
-        height, width, _ = image.shape
+        height, width, channels = image.shape
+        # print(f"Got image with shape ({height}, {width})")
+        # print("Got image with shape", image.shape)
         if height > width:
             scale = self.img_size / height
             resized_height = self.img_size
@@ -155,19 +143,26 @@ class Resizer(object):
             resized_width = self.img_size
 
         # compute padding
-        padh, padw = resized_height - height, resized_width - width
-        padh /= 2
-        padw /= 2
+        padh = max(int((self.img_size - resized_height) / 2.), 0)
+        padw = max(int((self.img_size - resized_width) / 2.), 0)
+        # print(f"padh: {padh}, padw: {padw}")
+        # print(f"re_h: {resized_height}, re_w: {resized_width}")
 
         image = cv2.resize(
             image,
             (resized_width, resized_height),
             interpolation=cv2.INTER_LINEAR
         )
+        if image.ndim == 2:  # grayscale image
+            image = image[..., np.newaxis]
 
         # put image in center (padding)
-        new_image = np.zeros((self.img_size, self.img_size, image.shape[-1]))
-        new_image[padh:padh+resized_height, padw: padw+resized_width] = image
+        new_image = np.zeros((self.img_size, self.img_size, channels))
+        assert padh + resized_height <= self.img_size, \
+            f"padh: {padh}, re_h: {resized_height}"
+        assert padw + resized_width <= self.img_size, \
+            f"padw: {padw}, re_w: {resized_width}"
+        new_image[padh: padh+resized_height, padw: padw+resized_width] = image
 
         # annots[:, :4] *= self.img_size
         if annots.size > 0:

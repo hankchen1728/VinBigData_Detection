@@ -196,7 +196,8 @@ class ModelWithLoss(nn.Module):
 def train(opt):
     params = Params(f'projects/{opt.project}.yml')
 
-    if len(opt.cuda_devices.split(',')) == 0:
+    num_gpus = len(opt.cuda_devices.split(','))
+    if num_gpus == 0:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = opt.cuda_devices
@@ -313,7 +314,7 @@ def train(opt):
     # apply sync_bn can solve it,
     # by packing all mini-batch across all gpus as one batch and normalize, then send it back to all gpus.
     # but it would also slow down the training by a little bit.
-    if params.num_gpus > 1 and opt.batch_size // params.num_gpus < 4:
+    if num_gpus > 1 and opt.batch_size // num_gpus < 4:
         model.apply(replace_w_sync_bn)
         use_sync_bn = True
     else:
@@ -324,10 +325,10 @@ def train(opt):
     # warp the model with loss function, to reduce the memory usage on gpu0 and speedup
     model = ModelWithLoss(model, debug=opt.debug)
 
-    if params.num_gpus > 0:
+    if num_gpus > 0:
         model = model.cuda()
-        if params.num_gpus > 1:
-            model = CustomDataParallel(model, params.num_gpus)
+        if num_gpus > 1:
+            model = CustomDataParallel(model, num_gpus)
             if use_sync_bn:
                 patch_replication_callback(model)
 
@@ -374,7 +375,7 @@ def train(opt):
                     imgs = data['img']
                     annot = data['annot']
 
-                    if params.num_gpus == 1:
+                    if num_gpus == 1:
                         # if only one gpu, just send it to cuda:0
                         # elif multiple gpus, send it to multiple gpus in CustomDataParallel, not here
                         imgs = imgs.cuda()
@@ -432,7 +433,7 @@ def train(opt):
                         imgs = data['img']
                         annot = data['annot']
 
-                        if params.num_gpus == 1:
+                        if num_gpus == 1:
                             imgs = imgs.cuda()
                             annot = annot.cuda()
 
