@@ -10,14 +10,14 @@ from pydicom.pixel_data_handlers.util import apply_voi_lut
 
 def read_xray(
     dcm_path,
-    voi_lut=True,
+    voi_lut=False,
     fix_monochrome=True,
     normalization=False
 ) -> np.ndarray:
     dicom = pydicom.read_file(dcm_path)
     # For ignoring the UserWarning: "Bits Stored" value (14-bit)...
-    elem = dicom[0x0028, 0x0101]
-    elem.value = 16
+    # elem = dicom[0x0028, 0x0101]
+    # elem.value = 16
 
     # VOI LUT (if available by DICOM device) is used to transform raw DICOM
     # data to "human-friendly" view
@@ -32,8 +32,8 @@ def read_xray(
 
     if normalization:
         if "WindowCenter" in dicom and "WindowWidth" in dicom:
-            window_center = dicom.WindowCenter
-            window_width = dicom.WindowWidth
+            window_center = float(dicom.WindowCenter)
+            window_width = float(dicom.WindowWidth)
             y_min = (window_center - 0.5 * window_width)
             y_max = (window_center + 0.5 * window_width)
         else:
@@ -50,7 +50,12 @@ def save_dcm_to_npz(
     save_dir="/work/VinBigData/preprocessed",
     return_pixel_data=False
 ):
-    data = read_xray(dcm_path=dcm_path, normalization=True)
+    data = read_xray(
+        dcm_path=dcm_path,
+        voi_lut=False,
+        fix_monochrome=True,
+        normalization=True
+    )
 
     # Convert to float type
     # data = data.astype(np.float32)
@@ -61,7 +66,8 @@ def save_dcm_to_npz(
     npz_fname = os.path.basename(dcm_path).replace("dicom", "npz")
     np.savez_compressed(os.path.join(save_dir, npz_fname), img=data)
     if return_pixel_data:
-        return data, shape
+        data = data.astype(np.float32) / 65535.
+        return shape, data
     return shape
     # end
 
@@ -69,5 +75,5 @@ def save_dcm_to_npz(
 if __name__ == "__main__":
     save_dcm_to_npz(
         dcm_path="../tmp_data/0005e8e3701dfb1dd93d53e2ff537b6e.dicom",
-        save_base_dir="."
+        save_dir="."
     )

@@ -6,9 +6,11 @@ import multiprocessing
 import tqdm
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from ensemble_boxes import weighted_boxes_fusion as wbf
 
 from load_dicom import save_dcm_to_npz
+from utils import draw_bbox
 
 
 lesion_id_to_name = {
@@ -28,6 +30,24 @@ lesion_id_to_name = {
     13: "Pulmonary fibrosis",
     14: "No finding"
 }
+
+# color list for display bounding boxes
+label2color = [
+    [59, 238, 119],
+    [222, 21, 229],
+    [94, 49, 164],
+    [206, 221, 133],
+    [117, 75, 3],
+    [210, 224, 119],
+    [211, 176, 166],
+    [63, 7, 197],
+    [102, 65, 77],
+    [194, 134, 175],
+    [209, 219, 50],
+    [255, 44, 47],
+    [89, 125, 149],
+    [110, 27, 100]
+]
 
 
 def bboxes_fusion(img_shape, img_bbox_df):
@@ -88,9 +108,10 @@ def processing_case(img_info_dict):
     img_bbox_df = img_bbox_df.reset_index(drop=True)
 
     # Save pixel data to npz
-    img_shape = save_dcm_to_npz(
+    img_shape, pixel_data = save_dcm_to_npz(
         dcm_path=os.path.join(train_dcm_dir, img_id + ".dicom"),
-        save_dir=npz_dir
+        save_dir=npz_dir,
+        return_pixel_data=True
     )
 
     fused_labels = bboxes_fusion(img_shape, img_bbox_df)
@@ -101,11 +122,38 @@ def processing_case(img_info_dict):
         X=fused_labels,
         fmt=save_fmt
     )
-    # end
+
+    # Display and draw bounding boxes
+    if "display_dirname" in img_info_dict.keys():
+        dis_dir = os.path.join(save_base_dir, img_info_dict["display_dirname"])
+        pixel_data = (pixel_data * 255.).astype(np.uint8)
+        rgb_img = np.repeat(pixel_data[..., np.newaxis], axis=-1, repeats=3)
+
+        if fused_labels.size > 0:
+            fused_labels[:, [1, 3]] *= img_shape[1]
+            fused_labels[:, [2, 4]] *= img_shape[0]
+            fused_labels = fused_labels.astype(np.int)
+            for bbox in fused_labels:
+                label_id = bbox[0]
+                color = label2color[label_id]
+                label_name = lesion_id_to_name[label_id]
+                rgb_img = draw_bbox(
+                    rgb_img,
+                    box=list(bbox[1:]),
+                    label=label_name,
+                    color=color
+                )
+
+        plt.imsave(os.path.join(dis_dir, img_id + ".jpg"), rgb_img)
+        # end
 
 
 def main(args):
     train_df = pd.read_csv(args.train_csv)
+
+    # try on local
+    train_df = train_df[train_df["image_id"]=="0005e8e3701dfb1dd93d53e2ff537b6e"]
+
     npz_dirname = "img_npz"
     txt_dirname = "bbox_txt"
 
@@ -123,6 +171,16 @@ def main(args):
     ]
     os.makedirs(os.path.join(args.save_base_dir, npz_dirname), exist_ok=True)
     os.makedirs(os.path.join(args.save_base_dir, txt_dirname), exist_ok=True)
+
+    # Whether to save display *.jpg
+    if args.save_display:
+        display_dirname = "display"
+        os.makedirs(
+            os.path.join(args.save_base_dir, display_dirname),
+            exist_ok=True
+        )
+        for info_dict in info_dict_list:
+            info_dict["display_dirname"] = display_dirname
 
     print("Now running preprocessing part")
     with multiprocessing.Pool(args.workers) as pool:
@@ -156,6 +214,14 @@ if __name__ == "__main__":
         type=str,
         default="/work/VinBigData/preprocessed/",
         help="Path to store preprocessed *.npz and *.txt files"
+    )
+
+    parser.add_argument(
+        "--save-display",
+        action="store_true",
+        default=False,
+        help="Saving image with displaying bounding boxes "
+             "to <SAVE-BASE-DIR>/display"
     )
 
     parser.add_argument(
