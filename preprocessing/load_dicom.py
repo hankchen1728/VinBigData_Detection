@@ -12,12 +12,13 @@ def read_xray(
     dcm_path,
     voi_lut=False,
     fix_monochrome=True,
-    normalization=False
+    normalization=False,
+    apply_window=False
 ) -> np.ndarray:
     dicom = pydicom.read_file(dcm_path)
     # For ignoring the UserWarning: "Bits Stored" value (14-bit)...
-    # elem = dicom[0x0028, 0x0101]
-    # elem.value = 16
+    elem = dicom[0x0028, 0x0101]
+    elem.value = 16
 
     # VOI LUT (if available by DICOM device) is used to transform raw DICOM
     # data to "human-friendly" view
@@ -27,7 +28,7 @@ def read_xray(
         data = dicom.pixel_array
 
     if normalization:
-        if "WindowCenter" in dicom and "WindowWidth" in dicom:
+        if apply_window and "WindowCenter" in dicom and "WindowWidth" in dicom:
             window_center = float(dicom.WindowCenter)
             window_width = float(dicom.WindowWidth)
             y_min = (window_center - 0.5 * window_width)
@@ -52,21 +53,24 @@ def save_dcm_to_npz(
 ):
     data = read_xray(
         dcm_path=dcm_path,
-        voi_lut=True,
+        voi_lut=False,
         fix_monochrome=True,
-        normalization=True
+        normalization=True,
+        apply_window=True
     )
 
     # TODO
     # Convert to uint16 type
-    data = (data * 65535).astype(np.uint16)
+    # dtype_max = 65535
+    dtype_max = 255
+    data = (data * dtype_max).astype(np.uint8)
     shape = data.shape
 
     # Save to numpy file
     npz_fname = os.path.basename(dcm_path).replace("dicom", "npz")
     np.savez_compressed(os.path.join(save_dir, npz_fname), img=data)
     if return_pixel_data:
-        data = data.astype(np.float32) / 65535.
+        data = data.astype(np.float32) / dtype_max
         return shape, data
     return shape
     # end

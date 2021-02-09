@@ -152,9 +152,9 @@ def main(args):
     train_df = pd.read_csv(args.train_csv)
 
     # try on local
-    # train_df = train_df[
-    #     train_df["image_id"]=="0005e8e3701dfb1dd93d53e2ff537b6e"
-    # ]
+    train_df = train_df[
+        train_df["image_id"] == "ff00fd8abeb1fb6646fc3943f802cb8d"
+    ]
 
     npz_dirname = "img_npz"
     txt_dirname = "bbox_txt"

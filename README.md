@@ -19,11 +19,15 @@ The `*.txt` file specifications are:
 - One row per object
 - Each row is `class x_min y_min x_max y_max` format
 - Box coordinates are in **normalized** format (from 0 - 1). If your boxes are in pixels, divide `x_min` and `x_max` by image width, and `y_min` and `y_max` by image height.)  
-For example,
-![](./figures/YOLO_bbox_fmt.png=100x)
+For example,  
+<p align="center">
+    <img src="./figures/YOLO_bbox_fmt.png" alt="Example of annotation format" height="100">
+</p>
 
 ## Update log
 [2021-02-01] First version of preprocessing, including converting image to `*.npz` files and bounding boxes info. to `*.txt` files  
 [2021-02-03] Clone the [Yet-Another-EfficientDet-Pytorch](https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch.git), create custom dataset (see `EfficientDet/efficientdet/custom_dataset.py`) for loading VinBigData, and modified the input channels setting for entering gray-scale images  
 [2021-02-09] Add drawing box feature to `preprocessing_mp.py`, saving the plotted figures
-![](./figures/0005e8e3701dfb1dd93d53e2ff537b6e.jpg=400x)
+<p align="center">
+    <img src="./figures/0005e8e3701dfb1dd93d53e2ff537b6e.jpg" alt="Display of drawing bounding boxes" height="400">
+</p>
