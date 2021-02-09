@@ -129,7 +129,7 @@ def processing_case(img_info_dict):
         pixel_data = (pixel_data * 255.).astype(np.uint8)
         rgb_img = np.repeat(pixel_data[..., np.newaxis], axis=-1, repeats=3)
 
-        if fused_labels.size > 0:
+        if len(fused_labels) > 0:
             fused_labels[:, [1, 3]] *= img_shape[1]
             fused_labels[:, [2, 4]] *= img_shape[0]
             fused_labels = fused_labels.astype(np.int)
@@ -152,7 +152,9 @@ def main(args):
     train_df = pd.read_csv(args.train_csv)
 
     # try on local
-    train_df = train_df[train_df["image_id"]=="0005e8e3701dfb1dd93d53e2ff537b6e"]
+    # train_df = train_df[
+    #     train_df["image_id"]=="0005e8e3701dfb1dd93d53e2ff537b6e"
+    # ]
 
     npz_dirname = "img_npz"
     txt_dirname = "bbox_txt"
@@ -221,7 +223,7 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Saving image with displaying bounding boxes "
-             "to <SAVE-BASE-DIR>/display"
+             "to <SAVE_BASE_DIR>/display"
     )
 
     parser.add_argument(

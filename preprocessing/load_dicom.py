@@ -26,10 +26,6 @@ def read_xray(
     else:
         data = dicom.pixel_array
 
-    # depending on this value, X-ray may look inverted - fix that:
-    if fix_monochrome and dicom.PhotometricInterpretation == "MONOCHROME1":
-        data = np.amax(data) - data
-
     if normalization:
         if "WindowCenter" in dicom and "WindowWidth" in dicom:
             window_center = float(dicom.WindowCenter)
@@ -42,6 +38,10 @@ def read_xray(
         data = (data - y_min) / (y_max - y_min)
         data = np.clip(data, 0, 1)
 
+    # depending on this value, X-ray may look inverted - fix that:
+    if fix_monochrome and dicom.PhotometricInterpretation == "MONOCHROME1":
+        data = np.amax(data) - data
+
     return data
 
 
@@ -52,13 +52,13 @@ def save_dcm_to_npz(
 ):
     data = read_xray(
         dcm_path=dcm_path,
-        voi_lut=False,
+        voi_lut=True,
         fix_monochrome=True,
         normalization=True
     )
 
-    # Convert to float type
-    # data = data.astype(np.float32)
+    # TODO
+    # Convert to uint16 type
     data = (data * 65535).astype(np.uint16)
     shape = data.shape
 
