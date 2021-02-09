@@ -130,12 +130,6 @@ def get_args():
              "with no improvement after which training will be stopped."
              "Set to 0 to disable this technique."
     )
-    # parser.add_argument(
-    #     '--data_path',
-    #     type=str,
-    #     default='datasets/',
-    #     help='the root folder of dataset'
-    # )
     parser.add_argument(
         '--log_path',
         type=str,
@@ -149,13 +143,13 @@ def get_args():
              "set None to initialize, set \'last\' to load last checkpoint"
     )
     parser.add_argument(
-        "--saved_path",
+        "--saved-path",
         type=str,
         default="logs/"
     )
     parser.add_argument(
         '--debug',
-        type=boolean_string,
+        action="store_true",
         default=False,
         help="whether visualize the predicted boxes of training, "
              "the output images will be in test/"

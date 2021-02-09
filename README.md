@@ -24,3 +24,4 @@ For example,
 
 ## Update log
 [2021-02-01] First version of preprocessing, including converting image to `*.npz` files and bounding boxes info. to `*.txt` files
+[2021-02-03] Clone the [Yet-Another-EfficientDet-Pytorch](https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch.git), create custom dataset (see `EfficientDet/efficientdet/custom_dataset.py`) for loading VinBigData, and modified the input channels setting for entering gray-scale images

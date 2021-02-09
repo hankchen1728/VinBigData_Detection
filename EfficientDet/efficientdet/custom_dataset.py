@@ -166,8 +166,8 @@ class Resizer(object):
 
         # annots[:, :4] *= self.img_size
         if annots.size > 0:
-            annots[:, [0, 2]] = annots[:, [0, 2]] * resized_height + padh
-            annots[:, [1, 3]] = annots[:, [1, 3]] * resized_width + padw
+            annots[:, [0, 2]] = annots[:, [0, 2]] * resized_width + padw
+            annots[:, [1, 3]] = annots[:, [1, 3]] * resized_height + padh
 
         return {
             "img": torch.from_numpy(new_image).to(torch.float32),
@@ -186,12 +186,12 @@ class Augmenter(object):
 
             rows, cols, channels = image.shape
 
-            x1 = annots[:, 0].copy()
-            x2 = annots[:, 2].copy()
+            x_min = annots[:, 0].copy()
+            x_max = annots[:, 2].copy()
 
-            x_tmp = x1.copy()
+            x_tmp = x_min.copy()
 
-            annots[:, 0] = cols - x2
+            annots[:, 0] = cols - x_max
             annots[:, 2] = cols - x_tmp
 
             sample = {'img': image, 'annot': annots}

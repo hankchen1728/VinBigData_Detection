@@ -53,8 +53,8 @@ def save_dcm_to_npz(
     data = read_xray(dcm_path=dcm_path, normalization=True)
 
     # Convert to float type
-    # data = data.astype(np.float16)
-    data = data.astype(np.float32)
+    # data = data.astype(np.float32)
+    data = (data * 65535).astype(np.uint16)
     shape = data.shape
 
     # Save to numpy file

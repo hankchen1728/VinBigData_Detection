@@ -22,7 +22,7 @@ from .utils_extra import Conv2dStaticSamePadding
 
 GlobalParams = collections.namedtuple('GlobalParams', [
     'batch_norm_momentum', 'batch_norm_epsilon', 'dropout_rate',
-    'num_classes', 'width_coefficient', 'depth_coefficient',
+    'num_classes', 'in_channels', 'width_coefficient', 'depth_coefficient',
     'depth_divisor', 'min_depth', 'drop_connect_rate', 'image_size'])
 
 # Parameters for an individual model block
