@@ -49,26 +49,29 @@ def read_xray(
 def save_dcm_to_npz(
     dcm_path,
     save_dir="/work/VinBigData/preprocessed",
+    force_replace=False,
     return_pixel_data=False
 ):
-    data = read_xray(
-        dcm_path=dcm_path,
-        voi_lut=False,
-        fix_monochrome=True,
-        normalization=True,
-        apply_window=True
-    )
+    npz_fname = os.path.basename(dcm_path).replace("dicom", "npz")
+    if force_replace:
+        data = read_xray(
+            dcm_path=dcm_path,
+            voi_lut=False,
+            fix_monochrome=True,
+            normalization=True,
+            apply_window=True
+        )
+        # TODO: Convert to uint16 type
+        # dtype_max = 65535
+        dtype_max = 255
+        data = (data * dtype_max).astype(np.uint8)
+        # Save to numpy file
+        np.savez_compressed(os.path.join(save_dir, npz_fname), img=data)
+    else:
+        data = np.load(npz_fname)["img"]
 
-    # TODO
-    # Convert to uint16 type
-    # dtype_max = 65535
-    dtype_max = 255
-    data = (data * dtype_max).astype(np.uint8)
     shape = data.shape
 
-    # Save to numpy file
-    npz_fname = os.path.basename(dcm_path).replace("dicom", "npz")
-    np.savez_compressed(os.path.join(save_dir, npz_fname), img=data)
     if return_pixel_data:
         data = data.astype(np.float32) / dtype_max
         return shape, data

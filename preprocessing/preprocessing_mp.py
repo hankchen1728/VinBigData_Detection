@@ -81,7 +81,7 @@ def bboxes_fusion(img_shape, img_bbox_df):
                 boxes_list=[selected_bboxes],
                 scores_list=np.ones((1, class_id_cnt[c_id])),
                 labels_list=np.full((1, class_id_cnt[c_id]), fill_value=c_id),
-                iou_thr=0.5,
+                iou_thr=0.35,
                 skip_box_thr=1e-3
             )
             fused_bboxes.append(wbf_boxes)
@@ -111,6 +111,7 @@ def processing_case(img_info_dict):
     img_shape, pixel_data = save_dcm_to_npz(
         dcm_path=os.path.join(train_dcm_dir, img_id + ".dicom"),
         save_dir=npz_dir,
+        force_replace=False,
         return_pixel_data=True
     )
 
@@ -150,11 +151,6 @@ def processing_case(img_info_dict):
 
 def main(args):
     train_df = pd.read_csv(args.train_csv)
-
-    # try on local
-    # train_df = train_df[
-    #     train_df["image_id"] == "ff00fd8abeb1fb6646fc3943f802cb8d"
-    # ]
 
     npz_dirname = "img_npz"
     txt_dirname = "bbox_txt"
