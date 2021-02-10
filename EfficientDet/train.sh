@@ -3,10 +3,9 @@ python3 train.py \
     -c 2 \
     --num-workers 32 \
     --cuda-devices 4,5,6,7 \
-    --batch-size 64 \
+    --batch-size 80 \
     --lr 0.0001 \
     --optim adamw \
     --num-epochs 300 \
     --es-patience 30 \
-    --saved-path /work/VinBigData/exp-records/efficientdet-d2 \
-    --debug
+    --saved-path /work/VinBigData/exp-records/efficientdet-d2
