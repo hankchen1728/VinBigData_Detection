@@ -4,7 +4,66 @@ import torch
 import numpy as np
 
 from torch.utils.data import Dataset
+from load_dicom import read_xray
 # from torch.utils.data import DataLoader
+
+
+class VinBigDicomDataset(Dataset):
+    def __init__(
+        self,
+        img_dir="/work/VinBigData/raw_data/test/",
+        img_ext="dicom",
+        img_size=1024,
+        class_names=[],
+        transform=None
+    ):
+        self.img_dir = img_dir
+        self.img_ext = img_ext
+        self.img_size = img_size
+        self.class_names = class_names
+        # Get all dicom filenames
+        self.image_ids = [
+            img_fname.split('.')[0]
+            for img_fname in os.listdir(self.img_dir)
+            if img_fname.split('.')[-1] == img_ext
+        ]
+
+        self.load_classes()
+
+    def load_classes(self):
+        # load class names (name -> label)
+        self.classes = {}
+        for i, c in enumerate(self.class_names):
+            self.classes[c] = i
+
+        # also load the reverse (label -> name)
+        self.labels = {}
+        for key, value in self.classes.items():
+            self.labels[value] = key
+
+    def __len__(self):
+        return len(self.image_ids)
+
+    def __getitem__(self, idx):
+        dcm_fpath = os.path.join(
+            self.img_dir,
+            self.image_ids[idx] + '.' + self.img_ext
+        )
+        # Load the dicom Images
+        # Normalization has done in reading function
+        img = read_xray(
+            dcm_fpath,
+            voi_lut=False,
+            fix_monochrome=True,
+            normalization=True,
+            apply_window=True
+        )
+        # Resize and padding
+        img, _, _, _ = letterbox(img, img_size=self.img_size)
+
+        if self.transform:
+            img = self.transform(img)
+        return img
 
 
 class VinBigDataset(Dataset):
@@ -122,6 +181,44 @@ def collater(data):
     return {'img': imgs, 'annot': annot_padded, 'scale': scales}
 
 
+def letterbox(image, img_size=1024):
+    # TODO: use `cv2.copyMakeBorder` to do padding
+    height, width, channels = image.shape
+    # print(f"Got image with shape ({height}, {width})")
+    # print("Got image with shape", image.shape)
+    if height > width:
+        scale = img_size / height
+        resized_height = img_size
+        resized_width = int(width * scale)
+    else:
+        scale = img_size / width
+        resized_height = int(height * scale)
+        resized_width = img_size
+
+    # compute padding
+    padh = max(int((img_size - resized_height) / 2.), 0)
+    padw = max(int((img_size - resized_width) / 2.), 0)
+    # print(f"padh: {padh}, padw: {padw}")
+    # print(f"re_h: {resized_height}, re_w: {resized_width}")
+
+    image = cv2.resize(
+        image,
+        (resized_width, resized_height),
+        interpolation=cv2.INTER_LINEAR
+    )
+    if image.ndim == 2:  # grayscale image
+        image = image[..., np.newaxis]
+
+    # put image in center (padding)
+    new_image = np.zeros((img_size, img_size, channels))
+    assert padh + resized_height <= img_size, \
+        f"padh: {padh}, re_h: {resized_height}"
+    assert padw + resized_width <= img_size, \
+        f"padw: {padw}, re_w: {resized_width}"
+    new_image[padh: padh+resized_height, padw: padw+resized_width] = image
+    return new_image, scale, (resized_height, resized_width), (padh, padw)
+
+
 class Resizer(object):
     """Convert ndarrays in sample to Tensors."""
 
@@ -130,39 +227,8 @@ class Resizer(object):
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
-        height, width, channels = image.shape
-        # print(f"Got image with shape ({height}, {width})")
-        # print("Got image with shape", image.shape)
-        if height > width:
-            scale = self.img_size / height
-            resized_height = self.img_size
-            resized_width = int(width * scale)
-        else:
-            scale = self.img_size / width
-            resized_height = int(height * scale)
-            resized_width = self.img_size
-
-        # compute padding
-        padh = max(int((self.img_size - resized_height) / 2.), 0)
-        padw = max(int((self.img_size - resized_width) / 2.), 0)
-        # print(f"padh: {padh}, padw: {padw}")
-        # print(f"re_h: {resized_height}, re_w: {resized_width}")
-
-        image = cv2.resize(
-            image,
-            (resized_width, resized_height),
-            interpolation=cv2.INTER_LINEAR
-        )
-        if image.ndim == 2:  # grayscale image
-            image = image[..., np.newaxis]
-
-        # put image in center (padding)
-        new_image = np.zeros((self.img_size, self.img_size, channels))
-        assert padh + resized_height <= self.img_size, \
-            f"padh: {padh}, re_h: {resized_height}"
-        assert padw + resized_width <= self.img_size, \
-            f"padw: {padw}, re_w: {resized_width}"
-        new_image[padh: padh+resized_height, padw: padw+resized_width] = image
+        new_image, scale, (resized_height, resized_width), (padw, padh) = \
+            letterbox(image, img_size=self.img_size)
 
         # annots[:, :4] *= self.img_size
         if annots.size > 0:
