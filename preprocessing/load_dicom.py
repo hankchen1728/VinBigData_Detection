@@ -53,7 +53,13 @@ def save_dcm_to_npz(
     return_pixel_data=False
 ):
     npz_fname = os.path.basename(dcm_path).replace("dicom", "npz")
-    if force_replace:
+    npz_fpath = os.path.join(save_dir, npz_fname)
+    # dtype_max = 65535
+    dtype_max = 255
+
+    if not force_replace and os.path.isfile(npz_fpath):
+        data = np.load(npz_fpath)["img"]
+    else:
         data = read_xray(
             dcm_path=dcm_path,
             voi_lut=False,
@@ -62,13 +68,9 @@ def save_dcm_to_npz(
             apply_window=True
         )
         # TODO: Convert to uint16 type
-        # dtype_max = 65535
-        dtype_max = 255
         data = (data * dtype_max).astype(np.uint8)
         # Save to numpy file
-        np.savez_compressed(os.path.join(save_dir, npz_fname), img=data)
-    else:
-        data = np.load(npz_fname)["img"]
+        np.savez_compressed(npz_fpath, img=data)
 
     shape = data.shape
 

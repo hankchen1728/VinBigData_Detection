@@ -1,7 +1,3 @@
-# original author: signatrix
-# adapted from https://github.com/signatrix/efficientdet/blob/master/train.py
-# modified by Zylo117
-
 import os
 import json
 import argparse
@@ -13,7 +9,6 @@ import yaml
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from tqdm.autonotebook import tqdm
 
@@ -22,18 +17,17 @@ from efficientdet.custom_dataset import (
     VinBigDataset,
     Resizer,
     Normalizer,
-    Augmenter,
     collater
 )
-from efficientdet.loss import FocalLoss
-from utils.sync_batchnorm import patch_replication_callback
 from utils.utils import (
-    replace_w_sync_bn,
     CustomDataParallel,
     get_last_weights,
     init_weights,
     boolean_string
 )
+
+
+input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
 
 
 class Params:
@@ -46,7 +40,7 @@ class Params:
 
 def get_args():
     parser = argparse.ArgumentParser(
-        'EfficientDet Pytorch (Zylo117)'
+        "EfficientDet Prediction"
     )
     parser.add_argument(
         '-p', '--project',
@@ -79,60 +73,9 @@ def get_args():
         help='The number of images per batch among all devices'
     )
     parser.add_argument(
-        '--head-only',
-        type=boolean_string,
-        default=False,
-        help='whether finetunes only the regressor and the classifier, '
-             'useful in early stage convergence or small/easy dataset'
-    )
-    parser.add_argument(
-        '--lr',
-        type=float,
-        default=1e-4
-    )
-    parser.add_argument(
-        '--optim',
+        '--pred-save-path',
         type=str,
-        default='adamw',
-        help='select optimizer for training, suggest using \'admaw\' until the'
-             ' very final stage then switch to \'sgd\''
-    )
-    parser.add_argument(
-        '--num-epochs',
-        type=int,
-        default=500
-    )
-    parser.add_argument(
-        '--val-interval',
-        type=int,
-        default=1,
-        help='Number of epoches between valing phases'
-    )
-    parser.add_argument(
-        '--save-interval',
-        type=int,
-        default=500,
-        help='Number of steps between saving'
-    )
-    parser.add_argument(
-        '--es-min-delta',
-        type=float,
-        default=0.0,
-        help="Early stopping\'s parameter: minimum change loss to "
-             "qualify as an improvement"
-    )
-    parser.add_argument(
-        '--es-patience',
-        type=int,
-        default=0,
-        help="Early stopping\'s parameter: number of epochs "
-             "with no improvement after which training will be stopped."
-             "Set to 0 to disable this technique."
-    )
-    parser.add_argument(
-        '--log_path',
-        type=str,
-        default='logs/'
+        default='test/'
     )
     parser.add_argument(
         '-w', '--load_weights',
@@ -142,15 +85,10 @@ def get_args():
              "set None to initialize, set \'last\' to load last checkpoint"
     )
     parser.add_argument(
-        "--saved-path",
-        type=str,
-        default="logs/"
-    )
-    parser.add_argument(
-        '--debug',
+        '--visualization',
         action="store_true",
         default=False,
-        help="whether visualize the predicted boxes of training, "
+        help="whether visualize the predicted boxes, "
              "the output images will be in test/"
     )
 
@@ -158,35 +96,7 @@ def get_args():
     return args
 
 
-class ModelWithLoss(nn.Module):
-    def __init__(self, model, debug=False):
-        super().__init__()
-        self.criterion = FocalLoss()
-        self.model = model
-        self.debug = debug
-
-    def forward(self, imgs, annotations, obj_list=None):
-        _, regression, classification, anchors = self.model(imgs)
-        if self.debug:
-            cls_loss, reg_loss = self.criterion(
-                classification,
-                regression,
-                anchors,
-                annotations,
-                imgs=imgs,
-                obj_list=obj_list
-            )
-        else:
-            cls_loss, reg_loss = self.criterion(
-                classification,
-                regression,
-                anchors,
-                annotations
-            )
-        return cls_loss, reg_loss
-
-
-def train(opt):
+def predict(opt):
     params = Params(f'projects/{opt.project}.yml')
 
     num_gpus = len(opt.cuda_devices.split(','))
@@ -200,20 +110,10 @@ def train(opt):
     else:
         torch.manual_seed(42)
 
-    opt.saved_path = opt.saved_path + f'/{params.project_name}/'
-    opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
-    os.makedirs(opt.log_path, exist_ok=True)
-    os.makedirs(opt.saved_path, exist_ok=True)
-
-    train_val_split = json.load(open(params.train_val_split, 'r'))
-
-    training_params = {
-        'batch_size': opt.batch_size,
-        'shuffle': True,
-        'drop_last': True,
-        'collate_fn': collater,
-        'num_workers': opt.num_workers
-    }
+    # opt.saved_path = opt.saved_path + f'/{params.project_name}/'
+    # opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
+    # os.makedirs(opt.log_path, exist_ok=True)
+    # os.makedirs(opt.saved_path, exist_ok=True)
 
     val_params = {
         'batch_size': opt.batch_size,
@@ -223,7 +123,6 @@ def train(opt):
         'num_workers': opt.num_workers
     }
 
-    input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
     training_set = VinBigDataset(
         img_dir=params.image_dir,
         ann_dir=params.annot_dir,
