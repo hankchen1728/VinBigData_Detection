@@ -1,30 +1,20 @@
 import os
-import json
 import argparse
-import datetime
-import traceback
+# import datetime
+# import traceback
 
 import numpy as np
+import pandas as pd
 import yaml
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
-from torchvision import transforms
-from tqdm.autonotebook import tqdm
+# from tqdm.autonotebook import tqdm
+from tqdm import tqdm
 
 from backbone import EfficientDetBackbone
-from efficientdet.custom_dataset import (
-    VinBigDataset,
-    Resizer,
-    Normalizer,
-    collater
-)
-from utils.utils import (
-    CustomDataParallel,
-    get_last_weights,
-    init_weights,
-    boolean_string
-)
+from efficientdet.custom_dataset import VinBigDicomDataset, infer_collater
+from efficientdet.utils import BBoxTransform, ClipBoxes
+from utils.utils import CustomDataParallel, init_weights, postprocess
 
 
 input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
@@ -73,9 +63,19 @@ def get_args():
         help='The number of images per batch among all devices'
     )
     parser.add_argument(
-        '--pred-save-path',
+        '--iou-thres',
+        type=float,
+        default=0.3,
+    )
+    parser.add_argument(
+        '--score-thres',
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        '--pred-csv-path',
         type=str,
-        default='test/'
+        default='submission.csv'
     )
     parser.add_argument(
         '-w', '--load_weights',
@@ -101,7 +101,7 @@ def predict(opt):
 
     num_gpus = len(opt.cuda_devices.split(','))
     if num_gpus == 0:
-        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+        os.environ["CUDA_VISIBLE_DEVICES"] = '-1'
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = opt.cuda_devices
 
@@ -109,44 +109,26 @@ def predict(opt):
         torch.cuda.manual_seed(42)
     else:
         torch.manual_seed(42)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # opt.saved_path = opt.saved_path + f'/{params.project_name}/'
     # opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
     # os.makedirs(opt.log_path, exist_ok=True)
     # os.makedirs(opt.saved_path, exist_ok=True)
 
-    val_params = {
+    test_params = {
         'batch_size': opt.batch_size,
         'shuffle': False,
-        'drop_last': True,
-        'collate_fn': collater,
-        'num_workers': opt.num_workers
+        'drop_last': False,
+        'num_workers': opt.num_workers,
+        "collate_fn": infer_collater
     }
 
-    training_set = VinBigDataset(
+    testing_set = VinBigDicomDataset(
         img_dir=params.image_dir,
-        ann_dir=params.annot_dir,
-        image_ids=train_val_split["train"],
-        dset="train",
-        transform=transforms.Compose([
-            Normalizer(mean=params.mean, std=params.std),
-            Augmenter(),
-            Resizer(input_sizes[opt.compound_coef])
-        ])
+        img_size=input_sizes[opt.compound_coef]
     )
-    training_generator = DataLoader(training_set, **training_params)
-
-    val_set = VinBigDataset(
-        img_dir=params.image_dir,
-        ann_dir=params.annot_dir,
-        image_ids=train_val_split["val"],
-        dset="val",
-        transform=transforms.Compose([
-            Normalizer(mean=params.mean, std=params.std),
-            Resizer(input_sizes[opt.compound_coef])
-        ])
-    )
-    val_generator = DataLoader(val_set, **val_params)
+    test_dataloader = DataLoader(testing_set, **test_params)
 
     model = EfficientDetBackbone(
         in_channels=int(params.in_channels),
@@ -156,21 +138,17 @@ def predict(opt):
         scales=eval(params.anchors_scales)
     )
 
+    # TODO: can we given specific score-threshold for each class
+    threshold = opt.score_thres
+    iou_threshold = opt.iou_thres
+
     # load last weights
     if opt.load_weights is not None:
-        if opt.load_weights.endswith('.pth'):
-            weights_path = opt.load_weights
-        else:
-            weights_path = get_last_weights(opt.saved_path)
-        try:
-            last_step = int(
-                os.path.basename(weights_path).split('_')[-1].split('.')[0]
-            )
-        except Exception:
-            last_step = 0
+        assert opt.load_weights.endswith('.pth'), f"{opt.load_weights}"
+        weights_path = opt.load_weights
 
         try:
-            ret = model.load_state_dict(torch.load(weights_path), strict=False)
+            model.load_state_dict(torch.load(weights_path), strict=True)
         except RuntimeError as e:
             print(f'[Warning] Ignoring {e}')
             print(
@@ -183,210 +161,97 @@ def predict(opt):
         print(f"[Info] loaded weights: {os.path.basename(weights_path)}, "
               "resuming checkpoint from step: {last_step}")
     else:
-        last_step = 0
         print('[Info] initializing weights...')
         init_weights(model)
 
-    # freeze backbone if train head_only
-    if opt.head_only:
-        def freeze_backbone(m):
-            classname = m.__class__.__name__
-            for ntl in ['EfficientNet', 'BiFPN']:
-                if ntl in classname:
-                    for param in m.parameters():
-                        param.requires_grad = False
-
-        model.apply(freeze_backbone)
-        print('[Info] freezed backbone')
-
-    # https://github.com/vacancy/Synchronized-BatchNorm-PyTorch
-    # apply sync_bn when using multiple gpu and batch_size per gpu is lower than 4
-    #  useful when gpu memory is limited.
-    # because when bn is disable, the training will be very unstable or slow to converge,
-    # apply sync_bn can solve it,
-    # by packing all mini-batch across all gpus as one batch and normalize, then send it back to all gpus.
-    # but it would also slow down the training by a little bit.
-    if num_gpus > 1 and opt.batch_size // num_gpus < 4:
-        model.apply(replace_w_sync_bn)
-        use_sync_bn = True
-    else:
-        use_sync_bn = False
-
-    writer = SummaryWriter(opt.log_path + f'/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}/')
-
-    # warp the model with loss function, to reduce the memory usage on gpu0 and speedup
-    model = ModelWithLoss(model, debug=opt.debug)
-
+    # Mapping model to gpu device
+    # TODO: Handling "half-precision" case (float16)
     if num_gpus > 0:
         model = model.cuda()
         if num_gpus > 1:
+            # TODO: Modify the `CustomDataParallel`
+            # for loading the last batch
+            # which size is smaller than given `batch_size`
             model = CustomDataParallel(model, num_gpus)
-            if use_sync_bn:
-                patch_replication_callback(model)
 
-    if opt.optim == 'adamw':
-        optimizer = torch.optim.AdamW(
-            model.parameters(),
-            opt.lr
-        )
-    else:
-        optimizer = torch.optim.SGD(
-            model.parameters(),
-            opt.lr,
-            momentum=0.9,
-            nesterov=True
-        )
+    model.eval()
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        patience=3,
-        verbose=True
-    )
+    regressBoxes = BBoxTransform()
+    clipBoxes = ClipBoxes()
+    predictions = []
+    for i_batch, data in tqdm(enumerate(test_dataloader)):
+        with torch.no_grad():
+            imgs = data["img"].to(device)
+            img_ids = data["id"]
+            scales = data["scale"]
+            paddings = data["padding"]
+            _, regression, classification, anchors = model(imgs)
+            out = postprocess(
+                imgs,
+                anchors,
+                regression,
+                classification,
+                regressBoxes,
+                clipBoxes,
+                threshold,
+                iou_threshold
+            )
+            out = invert_affine(out, scales, paddings)
 
-    epoch = 0
-    best_loss = 1e5
-    best_epoch = 0
-    step = max(0, last_step)
-    model.train()
-
-    num_iter_per_epoch = len(training_generator)
-
-    try:
-        for epoch in range(opt.num_epochs):
-            last_epoch = step // num_iter_per_epoch
-            if epoch < last_epoch:
-                continue
-
-            epoch_loss = []
-            progress_bar = tqdm(training_generator)
-            for iter, data in enumerate(progress_bar):
-                if iter < step - last_epoch * num_iter_per_epoch:
-                    progress_bar.update()
-                    continue
-                try:
-                    imgs = data['img']
-                    annot = data['annot']
-
-                    if num_gpus == 1:
-                        # if only one gpu, just send it to cuda:0
-                        # elif multiple gpus, send it to multiple gpus in CustomDataParallel, not here
-                        imgs = imgs.cuda()
-                        annot = annot.cuda()
-
-                    optimizer.zero_grad()
-                    cls_loss, reg_loss = model(
-                        imgs,
-                        annot,
-                        obj_list=params.obj_list
+            # Convert to PredictionString format
+            for i_img in range(len(imgs)):
+                pred = out[i_img]
+                pred_str = ""
+                if len(pred["rois"]) > 0:
+                    pred_str = format_prediction_string(
+                        pred["class_ids"],
+                        pred["scores"],
+                        pred["rois"].astype(np.int)
                     )
-                    cls_loss = cls_loss.mean()
-                    reg_loss = reg_loss.mean()
-
-                    loss = cls_loss + reg_loss
-                    if loss == 0 or not torch.isfinite(loss):
-                        continue
-
-                    loss.backward()
-                    # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
-                    optimizer.step()
-
-                    epoch_loss.append(float(loss))
-
-                    progress_bar.set_description(
-                        'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
-                            step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
-                            reg_loss.item(), loss.item()))
-                    writer.add_scalars('Loss', {'train': loss}, step)
-                    writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
-                    writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
-
-                    # log learning_rate
-                    current_lr = optimizer.param_groups[0]['lr']
-                    writer.add_scalar('learning_rate', current_lr, step)
-
-                    step += 1
-
-                    if step % opt.save_interval == 0 and step > 0:
-                        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
-                        print('checkpoint...')
-
-                except Exception as e:
-                    print('[Error]', traceback.format_exc())
-                    print(e)
-                    continue
-            scheduler.step(np.mean(epoch_loss))
-
-            if epoch % opt.val_interval == 0:
-                model.eval()
-                loss_regression_ls = []
-                loss_classification_ls = []
-                for iter, data in enumerate(val_generator):
-                    with torch.no_grad():
-                        imgs = data['img']
-                        annot = data['annot']
-
-                        if num_gpus == 1:
-                            imgs = imgs.cuda()
-                            annot = annot.cuda()
-
-                        cls_loss, reg_loss = model(
-                            imgs,
-                            annot,
-                            obj_list=params.obj_list
-                        )
-                        cls_loss = cls_loss.mean()
-                        reg_loss = reg_loss.mean()
-
-                        loss = cls_loss + reg_loss
-                        if loss == 0 or not torch.isfinite(loss):
-                            continue
-
-                        loss_classification_ls.append(cls_loss.item())
-                        loss_regression_ls.append(reg_loss.item())
-
-                cls_loss = np.mean(loss_classification_ls)
-                reg_loss = np.mean(loss_regression_ls)
-                loss = cls_loss + reg_loss
-
-                print(
-                    "Val. Epoch: {}/{}. Classification loss: {:1.5f}. "
-                    "Regression loss: {:1.5f}. Total loss: {:1.5f}".format(
-                        epoch, opt.num_epochs, cls_loss, reg_loss, loss))
-                writer.add_scalars('Loss', {'val': loss}, step)
-                writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
-                writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
-
-                if loss + opt.es_min_delta < best_loss:
-                    best_loss = loss
-                    best_epoch = epoch
-
-                    save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
-
-                model.train()
-
-                # Early stopping
-                if epoch - best_epoch > opt.es_patience > 0:
-                    print('[Info] Stop training at epoch {}. The lowest loss achieved is {}'.format(epoch, best_loss))
-                    break
-    except KeyboardInterrupt:
-        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
-        writer.close()
-    writer.close()
+                else:
+                    pred_str = "14 1.0 0 0 1 1"
+                predictions.append({
+                    "image_id": img_ids[i_img],
+                    "PredictionString": pred_str
+                })
+    pred_df = pd.DataFrame(
+        predictions,
+        columns=['image_id', 'PredictionString']
+    )
+    pred_df.to_csv(opt.pred_csv_path, index=False)
 
 
-def save_checkpoint(model, name):
-    if isinstance(model, CustomDataParallel):
-        torch.save(
-            model.module.model.state_dict(),
-            os.path.join(opt.saved_path, name)
-        )
-    else:
-        torch.save(
-            model.model.state_dict(),
-            os.path.join(opt.saved_path, name)
-        )
+def invert_affine(preds, scales, paddings):
+    """
+    TODO: Mapping the predicted boxes to original coordination
+    """
+    for i_img in range(len(preds)):
+        if len(preds[i_img]["rois"]) == 0:
+            continue
+        else:
+            # x-axis (width)
+            preds[i_img]["rois"][:, [0, 2]] = \
+                (preds[i_img]["rois"][:, [0, 2]] - paddings[i_img][1]) / \
+                scales[i_img]
+            # y-axis (height)
+            preds[i_img]["rois"][:, [1, 3]] = \
+                (preds[i_img]["rois"][:, [1, 3]] - paddings[i_img][0]) / \
+                scales[i_img]
+    return preds
+
+
+def format_prediction_string(labels, scores, boxes):
+    """
+    https://www.kaggle.com/basu369victor/chest-x-ray-abnormalities-detection-submission/output
+    """
+    pred_strings = []
+    for j in zip(labels, scores, boxes):
+        pred_strings.append("{0} {1:.4f} {2} {3} {4} {5}".format(
+            j[0], j[1], j[2][0], j[2][1], j[2][2], j[2][3]))
+
+    return " ".join(pred_strings)
 
 
 if __name__ == '__main__':
     opt = get_args()
-    train(opt)
+    predict(opt)

@@ -21,6 +21,7 @@ class VinBigDicomDataset(Dataset):
         self.img_ext = img_ext
         self.img_size = img_size
         self.class_names = class_names
+        self.transform = transform
         # Get all dicom filenames
         self.image_ids = [
             img_fname.split('.')[0]
@@ -45,6 +46,7 @@ class VinBigDicomDataset(Dataset):
         return len(self.image_ids)
 
     def __getitem__(self, idx):
+        img_id = self.image_ids[idx]
         dcm_fpath = os.path.join(
             self.img_dir,
             self.image_ids[idx] + '.' + self.img_ext
@@ -58,12 +60,26 @@ class VinBigDicomDataset(Dataset):
             normalization=True,
             apply_window=True
         )
+        if img.ndim == 2:
+            img = img[..., np.newaxis]  # add channel dim
+        # h0, w0, _ = img.shape
+
         # Resize and padding
-        img, _, _, _ = letterbox(img, img_size=self.img_size)
+        img, scale, padding = letterbox(img, img_size=self.img_size)
 
         if self.transform:
             img = self.transform(img)
-        return img
+        return {"img": img, "id": img_id, "scale": scale, "padding": padding}
+
+
+def infer_collater(data):
+    imgs = [s["img"] for s in data]
+    img_ids = [s["id"] for s in data]
+    scales = [s["scale"] for s in data]
+    paddings = [s["padding"] for s in data]
+
+    imgs = torch.from_numpy(np.stack(imgs, axis=0))
+    return {"img": imgs, "id": img_ids, "scale": scales, "padding": paddings}
 
 
 class VinBigDataset(Dataset):
@@ -184,8 +200,6 @@ def collater(data):
 def letterbox(image, img_size=1024):
     # TODO: use `cv2.copyMakeBorder` to do padding
     height, width, channels = image.shape
-    # print(f"Got image with shape ({height}, {width})")
-    # print("Got image with shape", image.shape)
     if height > width:
         scale = img_size / height
         resized_height = img_size
@@ -211,12 +225,12 @@ def letterbox(image, img_size=1024):
 
     # put image in center (padding)
     new_image = np.zeros((img_size, img_size, channels))
-    assert padh + resized_height <= img_size, \
-        f"padh: {padh}, re_h: {resized_height}"
-    assert padw + resized_width <= img_size, \
-        f"padw: {padw}, re_w: {resized_width}"
+    # assert padh + resized_height <= img_size, \
+    #     f"padh: {padh}, re_h: {resized_height}"
+    # assert padw + resized_width <= img_size, \
+    #     f"padw: {padw}, re_w: {resized_width}"
     new_image[padh: padh+resized_height, padw: padw+resized_width] = image
-    return new_image, scale, (resized_height, resized_width), (padh, padw)
+    return new_image, scale, (padh, padw)
 
 
 class Resizer(object):
@@ -227,13 +241,15 @@ class Resizer(object):
 
     def __call__(self, sample):
         image, annots = sample['img'], sample['annot']
-        new_image, scale, (resized_height, resized_width), (padw, padh) = \
-            letterbox(image, img_size=self.img_size)
+        h0, w0, _ = image.shape
+        new_image, scale, (padh, padw) = letterbox(
+            image, img_size=self.img_size
+        )
 
         # annots[:, :4] *= self.img_size
         if annots.size > 0:
-            annots[:, [0, 2]] = annots[:, [0, 2]] * resized_width + padw
-            annots[:, [1, 3]] = annots[:, [1, 3]] * resized_height + padh
+            annots[:, [0, 2]] = annots[:, [0, 2]] * w0 * scale + padw
+            annots[:, [1, 3]] = annots[:, [1, 3]] * h0 * scale + padh
 
         return {
             "img": torch.from_numpy(new_image).to(torch.float32),
