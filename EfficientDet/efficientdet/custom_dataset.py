@@ -4,7 +4,7 @@ import torch
 import numpy as np
 
 from torch.utils.data import Dataset
-from load_dicom import read_xray
+from efficientdet.load_dicom import read_xray
 # from torch.utils.data import DataLoader
 
 
@@ -53,33 +53,49 @@ class VinBigDicomDataset(Dataset):
         )
         # Load the dicom Images
         # Normalization has done in reading function
-        img = read_xray(
+        orig_img = read_xray(
             dcm_fpath,
             voi_lut=False,
             fix_monochrome=True,
             normalization=True,
             apply_window=True
         )
-        if img.ndim == 2:
-            img = img[..., np.newaxis]  # add channel dim
+        if orig_img.ndim == 2:
+            orig_img = orig_img[..., np.newaxis]  # add channel dim
         # h0, w0, _ = img.shape
 
         # Resize and padding
-        img, scale, padding = letterbox(img, img_size=self.img_size)
+        img, scale, padding = letterbox(orig_img, img_size=self.img_size)
 
         if self.transform:
             img = self.transform(img)
-        return {"img": img, "id": img_id, "scale": scale, "padding": padding}
+        return {
+            "img": img,
+            "orig": orig_img,
+            "id": img_id,
+            "scale": scale,
+            "padding": padding
+        }
 
 
 def infer_collater(data):
     imgs = [s["img"] for s in data]
+    orig_imgs = [s["orig"] for s in data]
     img_ids = [s["id"] for s in data]
     scales = [s["scale"] for s in data]
     paddings = [s["padding"] for s in data]
 
-    imgs = torch.from_numpy(np.stack(imgs, axis=0))
-    return {"img": imgs, "id": img_ids, "scale": scales, "padding": paddings}
+    imgs = torch.from_numpy(np.stack(imgs, axis=0)).to(torch.float32)
+
+    # tensor to channel first format
+    imgs = imgs.permute(0, 3, 1, 2)
+    return {
+        "img": imgs,
+        "orig": orig_imgs,
+        "id": img_ids,
+        "scale": scales,
+        "padding": paddings
+    }
 
 
 class VinBigDataset(Dataset):

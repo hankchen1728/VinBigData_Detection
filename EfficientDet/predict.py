@@ -3,13 +3,15 @@ import argparse
 # import datetime
 # import traceback
 
-import numpy as np
-import pandas as pd
+import cv2
 import yaml
 import torch
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 # from tqdm.autonotebook import tqdm
-from tqdm import tqdm
 
 from backbone import EfficientDetBackbone
 from efficientdet.custom_dataset import VinBigDicomDataset, infer_collater
@@ -18,6 +20,86 @@ from utils.utils import CustomDataParallel, init_weights, postprocess
 
 
 input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
+
+
+label2color = [
+    [59, 238, 119],
+    [222, 21, 229],
+    [94, 49, 164],
+    [206, 221, 133],
+    [117, 75, 3],
+    [210, 224, 119],
+    [211, 176, 166],
+    [63, 7, 197],
+    [102, 65, 77],
+    [194, 134, 175],
+    [209, 219, 50],
+    [255, 44, 47],
+    [89, 125, 149],
+    [110, 27, 100]
+]
+
+
+def draw_one_bbox(image, box, label, color, thickness=10):
+    alpha, alpha_box = 0.1, 0.4
+    font_scale, font_thick = 1.5, 2
+    overlay_bbox = image.copy()
+    overlay_text = image.copy()
+    output = image.copy()
+
+    text_width, text_height = cv2.getTextSize(
+        text=label.upper(),
+        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        fontScale=font_scale,
+        thickness=font_thick
+    )[0]
+    cv2.rectangle(overlay_bbox, (box[0], box[1]), (box[2], box[3]), color, -1)
+    cv2.addWeighted(overlay_bbox, alpha, output, 1 - alpha, 0, output)
+    cv2.rectangle(
+        overlay_text,
+        (box[0], box[1] - 10 - text_height),
+        (box[0] + text_width + 5, box[1]),
+        (0, 0, 0),
+        -1
+    )
+    cv2.addWeighted(overlay_text, alpha_box, output, 1 - alpha_box, 0, output)
+    cv2.rectangle(
+        output,
+        (box[0], box[1]),
+        (box[2], box[3]),
+        color,
+        thickness
+    )
+    cv2.putText(
+        img=output,
+        text=label.upper(),
+        org=(box[0], box[1] - 5),
+        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        fontScale=font_scale,
+        color=(255, 255, 255),
+        thickness=font_thick,
+        lineType=cv2.LINE_AA
+    )
+    return output
+
+
+def display_bboxes(img, class_ids, label_names, box_rois):
+    # to uint8
+    img = (img * 255.).astype(np.uint8)
+    rgb_img = np.repeat(img[..., [0]], axis=-1, repeats=3)
+    if len(box_rois) > 0:
+        box_rois = box_rois.astype(np.int)
+        for i_box, bbox in enumerate(box_rois):
+            label_id = class_ids[i_box]
+            label_name = label_names[i_box]
+            rgb_img = draw_one_bbox(
+                rgb_img,
+                box=list(bbox),
+                label=label_name,
+                color=label2color[label_id]
+            )
+
+    return rgb_img
 
 
 class Params:
@@ -62,6 +144,7 @@ def get_args():
         default=16,
         help='The number of images per batch among all devices'
     )
+    # TODO: move these two threshold setting to config file
     parser.add_argument(
         '--iou-thres',
         type=float,
@@ -91,9 +174,45 @@ def get_args():
         help="whether visualize the predicted boxes, "
              "the output images will be in test/"
     )
+    parser.add_argument(
+        "--visual-path",
+        type=str,
+        default="./pred_display"
+    )
 
     args = parser.parse_args()
     return args
+
+
+def invert_affine(preds, scales, paddings):
+    """
+    TODO: Mapping the predicted boxes to original coordination
+    """
+    for i_img in range(len(preds)):
+        if len(preds[i_img]["rois"]) == 0:
+            continue
+        else:
+            # x-axis (width)
+            preds[i_img]["rois"][:, [0, 2]] = \
+                (preds[i_img]["rois"][:, [0, 2]] - paddings[i_img][1]) / \
+                scales[i_img]
+            # y-axis (height)
+            preds[i_img]["rois"][:, [1, 3]] = \
+                (preds[i_img]["rois"][:, [1, 3]] - paddings[i_img][0]) / \
+                scales[i_img]
+    return preds
+
+
+def format_prediction_string(labels, scores, boxes):
+    """
+    https://www.kaggle.com/basu369victor/chest-x-ray-abnormalities-detection-submission/output
+    """
+    pred_strings = []
+    for j in zip(labels, scores, boxes):
+        pred_strings.append("{0} {1:.4f} {2} {3} {4} {5}".format(
+            j[0], j[1], j[2][0], j[2][1], j[2][2], j[2][3]))
+
+    return " ".join(pred_strings)
 
 
 def predict(opt):
@@ -115,7 +234,11 @@ def predict(opt):
     # opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
     # os.makedirs(opt.log_path, exist_ok=True)
     # os.makedirs(opt.saved_path, exist_ok=True)
+    #
+    if opt.visualization:
+        os.makedirs(opt.visual_path, exist_ok=True)
 
+    print("Configuring dataloader...")
     test_params = {
         'batch_size': opt.batch_size,
         'shuffle': False,
@@ -125,11 +248,12 @@ def predict(opt):
     }
 
     testing_set = VinBigDicomDataset(
-        img_dir=params.image_dir,
+        img_dir=params.test_dicom,
         img_size=input_sizes[opt.compound_coef]
     )
     test_dataloader = DataLoader(testing_set, **test_params)
 
+    print("Building model...")
     model = EfficientDetBackbone(
         in_channels=int(params.in_channels),
         num_classes=len(params.obj_list),
@@ -158,8 +282,7 @@ def predict(opt):
                 "should be loaded already."
             )
 
-        print(f"[Info] loaded weights: {os.path.basename(weights_path)}, "
-              "resuming checkpoint from step: {last_step}")
+        print(f"[Info] loaded weights: {os.path.basename(weights_path)}")
     else:
         print('[Info] initializing weights...')
         init_weights(model)
@@ -179,9 +302,12 @@ def predict(opt):
     regressBoxes = BBoxTransform()
     clipBoxes = ClipBoxes()
     predictions = []
-    for i_batch, data in tqdm(enumerate(test_dataloader)):
+    num_iters = len(test_dataloader)
+    obj_list = params.obj_list
+    for i_batch, data in tqdm(enumerate(test_dataloader), total=num_iters):
         with torch.no_grad():
             imgs = data["img"].to(device)
+            orig_imgs = data["orig"]
             img_ids = data["id"]
             scales = data["scale"]
             paddings = data["padding"]
@@ -214,42 +340,27 @@ def predict(opt):
                     "image_id": img_ids[i_img],
                     "PredictionString": pred_str
                 })
+
+                if opt.visualization:
+                    # To channel last and convert to numpy array
+                    # img = imgs[i_img].permute(1, 2, 0).cpu().numpy()
+                    img = orig_imgs[i_img]
+                    class_ids = pred["class_ids"]
+                    plotted_img = display_bboxes(
+                        img=img,
+                        class_ids=class_ids,
+                        label_names=[obj_list[int(c)] for c in class_ids],
+                        box_rois=pred["rois"].astype(np.int)
+                    )
+                    plt.imsave(
+                        os.path.join(opt.visual_path, img_ids[i_img] + ".jpg"),
+                        plotted_img
+                    )
     pred_df = pd.DataFrame(
         predictions,
         columns=['image_id', 'PredictionString']
     )
     pred_df.to_csv(opt.pred_csv_path, index=False)
-
-
-def invert_affine(preds, scales, paddings):
-    """
-    TODO: Mapping the predicted boxes to original coordination
-    """
-    for i_img in range(len(preds)):
-        if len(preds[i_img]["rois"]) == 0:
-            continue
-        else:
-            # x-axis (width)
-            preds[i_img]["rois"][:, [0, 2]] = \
-                (preds[i_img]["rois"][:, [0, 2]] - paddings[i_img][1]) / \
-                scales[i_img]
-            # y-axis (height)
-            preds[i_img]["rois"][:, [1, 3]] = \
-                (preds[i_img]["rois"][:, [1, 3]] - paddings[i_img][0]) / \
-                scales[i_img]
-    return preds
-
-
-def format_prediction_string(labels, scores, boxes):
-    """
-    https://www.kaggle.com/basu369victor/chest-x-ray-abnormalities-detection-submission/output
-    """
-    pred_strings = []
-    for j in zip(labels, scores, boxes):
-        pred_strings.append("{0} {1:.4f} {2} {3} {4} {5}".format(
-            j[0], j[1], j[2][0], j[2][1], j[2][2], j[2][3]))
-
-    return " ".join(pred_strings)
 
 
 if __name__ == '__main__':

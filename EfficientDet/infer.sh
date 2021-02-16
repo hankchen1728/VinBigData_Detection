@@ -1,0 +1,11 @@
+python3 predict.py \
+    --project vinbigdata \
+    -c 2 \
+    --num-workers 32 \
+    --cuda-devices 7 \
+    --batch-size 64 \
+    --iou-thres 0.3 \
+    --score-thres 0.2 \
+    --load_weights /work/VinBigData/exp-records/efficientdet-d2-resume/vinbigdata/efficientdet-d2_149_22500.pth \
+    --pred-csv-path ./submission.csv \
+    --visualization
