@@ -42,7 +42,7 @@ label2color = [
 
 def draw_one_bbox(image, box, label, color, thickness=10):
     alpha, alpha_box = 0.1, 0.4
-    font_scale, font_thick = 1.5, 2
+    font_scale, font_thick = 2, 3
     overlay_bbox = image.copy()
     overlay_text = image.copy()
     output = image.copy()
@@ -57,8 +57,8 @@ def draw_one_bbox(image, box, label, color, thickness=10):
     cv2.addWeighted(overlay_bbox, alpha, output, 1 - alpha, 0, output)
     cv2.rectangle(
         overlay_text,
-        (box[0], box[1] - 10 - text_height),
-        (box[0] + text_width + 5, box[1]),
+        (box[0], box[1] - 13 - text_height),
+        (box[0] + text_width + 7, box[1]),
         (0, 0, 0),
         -1
     )
@@ -83,7 +83,7 @@ def draw_one_bbox(image, box, label, color, thickness=10):
     return output
 
 
-def display_bboxes(img, class_ids, label_names, box_rois):
+def display_bboxes(img, class_ids, scores, label_names, box_rois):
     # to uint8
     img = (img * 255.).astype(np.uint8)
     rgb_img = np.repeat(img[..., [0]], axis=-1, repeats=3)
@@ -92,10 +92,11 @@ def display_bboxes(img, class_ids, label_names, box_rois):
         for i_box, bbox in enumerate(box_rois):
             label_id = class_ids[i_box]
             label_name = label_names[i_box]
+            score = scores[i_box]
             rgb_img = draw_one_bbox(
                 rgb_img,
                 box=list(bbox),
-                label=label_name,
+                label=f"{score:.2f}-{label_name}",
                 color=label2color[label_id]
             )
 
@@ -312,6 +313,7 @@ def predict(opt):
             scales = data["scale"]
             paddings = data["padding"]
             _, regression, classification, anchors = model(imgs)
+            # print("Running postprocessing")
             out = postprocess(
                 imgs,
                 anchors,
@@ -349,6 +351,7 @@ def predict(opt):
                     plotted_img = display_bboxes(
                         img=img,
                         class_ids=class_ids,
+                        scores=pred["scores"],
                         label_names=[obj_list[int(c)] for c in class_ids],
                         box_rois=pred["rois"].astype(np.int)
                     )

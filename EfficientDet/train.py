@@ -31,6 +31,7 @@ from utils.utils import (
     replace_w_sync_bn,
     CustomDataParallel,
     get_last_weights,
+    intersect_dicts,
     init_weights,
     boolean_string
 )
@@ -200,7 +201,7 @@ def train(opt):
     else:
         torch.manual_seed(42)
 
-    opt.saved_path = opt.saved_path + f'/{params.project_name}/'
+    opt.saved_path = os.path.join(opt.saved_path, params.project_name)
     opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
     os.makedirs(opt.log_path, exist_ok=True)
     os.makedirs(opt.saved_path, exist_ok=True)
@@ -271,7 +272,9 @@ def train(opt):
             last_step = 0
 
         try:
-            ret = model.load_state_dict(torch.load(weights_path), strict=False)
+            state_dict = torch.load(weights_path)
+            state_dict = intersect_dicts(state_dict, model.state_dict())
+            ret = model.load_state_dict(state_dict, strict=False)
         except RuntimeError as e:
             print(f'[Warning] Ignoring {e}')
             print(
@@ -282,7 +285,7 @@ def train(opt):
             )
 
         print(f"[Info] loaded weights: {os.path.basename(weights_path)}, "
-              "resuming checkpoint from step: {last_step}")
+              f"resuming checkpoint from step: {last_step}")
     else:
         last_step = 0
         print('[Info] initializing weights...')

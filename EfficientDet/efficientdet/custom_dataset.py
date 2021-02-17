@@ -155,7 +155,11 @@ class VinBigDataset(Dataset):
         img_fname = self.image_ids[image_index] + "." + self.img_ext
         path = os.path.join(self.img_dir, img_fname)
         # Read npz (compressed) data
-        img = np.load(path)["img"]
+        if self.img_ext == "npz":
+            img = np.load(path)["img"]
+        elif self.img_ext == "jpg":
+            img = cv2.imread(path)
+
         if img.ndim == 2:  # one channel gray image
             img = img[..., np.newaxis]  # add channel dim
 
@@ -225,27 +229,29 @@ def letterbox(image, img_size=1024):
         resized_height = int(height * scale)
         resized_width = img_size
 
-    # compute padding
-    padh = max(int((img_size - resized_height) / 2.), 0)
-    padw = max(int((img_size - resized_width) / 2.), 0)
-    # print(f"padh: {padh}, padw: {padw}")
-    # print(f"re_h: {resized_height}, re_w: {resized_width}")
+    if scale != 1:
+        image = cv2.resize(
+            image,
+            (resized_width, resized_height),
+            interpolation=cv2.INTER_LINEAR
+        )
+        if image.ndim == 2:  # grayscale image
+            image = image[..., np.newaxis]
 
-    image = cv2.resize(
-        image,
-        (resized_width, resized_height),
-        interpolation=cv2.INTER_LINEAR
-    )
-    if image.ndim == 2:  # grayscale image
-        image = image[..., np.newaxis]
-
-    # put image in center (padding)
-    new_image = np.zeros((img_size, img_size, channels))
-    # assert padh + resized_height <= img_size, \
-    #     f"padh: {padh}, re_h: {resized_height}"
-    # assert padw + resized_width <= img_size, \
-    #     f"padw: {padw}, re_w: {resized_width}"
-    new_image[padh: padh+resized_height, padw: padw+resized_width] = image
+    if image.shape[0] != img_size or image.shape[1] != img_size:
+        # compute padding
+        padh = max(int((img_size - resized_height) / 2.), 0)
+        padw = max(int((img_size - resized_width) / 2.), 0)
+        # put image in center (padding)
+        new_image = np.zeros((img_size, img_size, channels))
+        # assert padh + resized_height <= img_size, \
+        #     f"padh: {padh}, re_h: {resized_height}"
+        # assert padw + resized_width <= img_size, \
+        #     f"padw: {padw}, re_w: {resized_width}"
+        new_image[padh: padh+resized_height, padw: padw+resized_width] = image
+    else:
+        padh, padw = 0, 0
+        new_image = image
     return new_image, scale, (padh, padw)
 
 
@@ -308,4 +314,5 @@ class Normalizer(object):
 
         return {
             'img': ((image.astype(np.float32) - self.mean) / self.std),
-            'annot': annots}
+            'annot': annots
+        }

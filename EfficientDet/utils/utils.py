@@ -224,6 +224,25 @@ def get_last_weights(weights_path):
     return weights_path
 
 
+def intersect_dicts(da, db, exclude=()):
+    """
+    Dictionary intersection of matching keys and shapes,
+    omitting 'exclude' keys, using da values
+    https://github.com/ultralytics/yolov5/blob/9_target/utils/torch_utils.py#L77
+
+    Args:
+        da: state dict to be loaded
+        db: state dict of the model
+
+    Returns:
+    """
+    return {
+        k: v for k, v in da.items()
+        if k in db and not any(x in k for x in exclude)
+        and v.shape == db[k].shape
+    }
+
+
 def init_weights(model):
     for name, module in model.named_modules():
         is_conv_layer = isinstance(module, nn.Conv2d)
