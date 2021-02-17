@@ -31,3 +31,4 @@ For example,
 <p align="center">
     <img src="./figures/0005e8e3701dfb1dd93d53e2ff537b6e.jpg" alt="Display of drawing bounding boxes" height="400">
 </p>
+[2021-02-17] Commit first version of `aug.py` for augmentation.
