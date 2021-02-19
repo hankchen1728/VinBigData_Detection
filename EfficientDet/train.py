@@ -154,6 +154,12 @@ def get_args():
         help="whether visualize the predicted boxes of training, "
              "the output images will be in test/"
     )
+    parser.add_argument(
+        '--cache',
+        action="store_true",
+        default=False,
+        help="Cache images for faster training"
+    )
 
     args = parser.parse_args()
     return args
@@ -230,6 +236,7 @@ def train(opt):
         ann_dir=params.annot_dir,
         image_ids=train_val_split["train"],
         dset="train",
+        cache_images=opt.cache,
         transform=transforms.Compose([
             Normalizer(mean=params.mean, std=params.std),
             Augmenter(),
@@ -243,6 +250,7 @@ def train(opt):
         ann_dir=params.annot_dir,
         image_ids=train_val_split["val"],
         dset="val",
+        cache_images=opt.cache,
         transform=transforms.Compose([
             Normalizer(mean=params.mean, std=params.std),
             Resizer(input_sizes[opt.compound_coef])
@@ -271,10 +279,13 @@ def train(opt):
         except Exception:
             last_step = 0
 
+        ns, nl = 0, 0  # Number of state in wegiths file, allowed to loaded
         try:
             state_dict = torch.load(weights_path)
+            ns = len(state_dict)
             state_dict = intersect_dicts(state_dict, model.state_dict())
-            ret = model.load_state_dict(state_dict, strict=False)
+            nl = len(state_dict)
+            ret = model.load_state_dict(state_dict, strict=True)
         except RuntimeError as e:
             print(f'[Warning] Ignoring {e}')
             print(
@@ -284,7 +295,8 @@ def train(opt):
                 "should be loaded already."
             )
 
-        print(f"[Info] loaded weights: {os.path.basename(weights_path)}, "
+        print(f"[Info] loaded weights: , {ns} of {nl} states in "
+              f"{os.path.basename(weights_path)} are loaded, "
               f"resuming checkpoint from step: {last_step}")
     else:
         last_step = 0

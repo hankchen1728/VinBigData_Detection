@@ -2,9 +2,9 @@ import os
 from multiprocessing.pool import ThreadPool
 
 import cv2
-import tqdm
 import torch
 import numpy as np
+from tqdm import tqdm
 
 from torch.utils.data import Dataset
 from efficientdet.load_dicom import read_xray
@@ -136,7 +136,7 @@ class VinBigDataset(Dataset):
         # Cache labels
         self.annots = [None] * self.num_imgs
         ne = 0  # empty label
-        annot_samples = ThreadPool(8).imap(
+        annot_samples = ThreadPool(20).imap(
             self.load_annotations, list(range(self.num_imgs))
         )
         pbar = tqdm(enumerate(annot_samples), total=self.num_imgs)
@@ -197,7 +197,8 @@ class VinBigDataset(Dataset):
             if img.ndim == 2:  # one channel gray image
                 img = img[..., np.newaxis]  # add channel dim
 
-        return img.astype(np.float32)
+        # return img.astype(np.float32)
+        return img
 
     def load_annotations(self, image_index: int) -> np.ndarray:
         annot = self.annots[image_index]
