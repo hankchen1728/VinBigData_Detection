@@ -1,11 +1,13 @@
 import os
+from multiprocessing.pool import ThreadPool
+
 import cv2
+import tqdm
 import torch
 import numpy as np
 
 from torch.utils.data import Dataset
 from efficientdet.load_dicom import read_xray
-# from torch.utils.data import DataLoader
 
 
 class VinBigDicomDataset(Dataset):
@@ -79,6 +81,9 @@ class VinBigDicomDataset(Dataset):
 
 
 def infer_collater(data):
+    """
+    collate_fn for inference used dataloader
+    """
     imgs = [s["img"] for s in data]
     orig_imgs = [s["orig"] for s in data]
     img_ids = [s["id"] for s in data]
@@ -107,7 +112,8 @@ class VinBigDataset(Dataset):
         class_names=[],
         dset="train",
         image_ids=None,
-        transform=None
+        transform=None,
+        cache_images=False
     ):
 
         self.img_dir = img_dir  # folder for storing *.npz
@@ -125,6 +131,33 @@ class VinBigDataset(Dataset):
                 for img_fname in os.listdir(self.img_dir)
                 if img_fname.split('.')[-1] == img_ext
             ]
+        self.num_imgs = len(self)
+
+        # Cache labels
+        self.annots = [None] * self.num_imgs
+        ne = 0  # empty label
+        annot_samples = ThreadPool(8).imap(
+            self.load_annotations, list(range(self.num_imgs))
+        )
+        pbar = tqdm(enumerate(annot_samples), total=self.num_imgs)
+        for i, sample in pbar:
+            self.annots[i] = sample
+            if len(sample) > 0:
+                ne += 1
+            pbar.desc = f"Caching labels... {ne} empty, {i+1} loaded."
+
+        # Cache images for faster training
+        self.imgs = [None] * self.num_imgs
+        if cache_images:
+            img_nbytes = 0
+            img_samples = ThreadPool(8).imap(
+                self.load_image, list(range(self.num_imgs))
+            )
+            pbar = tqdm(enumerate(img_samples), total=self.num_imgs)
+            for i, sample in pbar:
+                self.imgs[i] = sample
+                img_nbytes += self.imgs[i].nbytes
+                pbar.desc = "Caching images (%.2fGB)" % (img_nbytes / 1e9)
 
         self.load_classes()
 
@@ -143,7 +176,6 @@ class VinBigDataset(Dataset):
         return len(self.image_ids)
 
     def __getitem__(self, idx):
-
         img = self.load_image(idx)
         annot = self.load_annotations(idx)
         sample = {'img': img, 'annot': annot}
@@ -152,42 +184,46 @@ class VinBigDataset(Dataset):
         return sample
 
     def load_image(self, image_index: int) -> np.ndarray:
-        img_fname = self.image_ids[image_index] + "." + self.img_ext
-        path = os.path.join(self.img_dir, img_fname)
-        # Read npz (compressed) data
-        if self.img_ext == "npz":
-            img = np.load(path)["img"]
-        elif self.img_ext == "jpg":
-            img = cv2.imread(path)
+        img = self.imgs[image_index]
+        if img is None:  # image not cached
+            img_fname = self.image_ids[image_index] + "." + self.img_ext
+            path = os.path.join(self.img_dir, img_fname)
+            # Read npz (compressed) data
+            if self.img_ext == "npz":
+                img = np.load(path)["img"]
+            elif self.img_ext == "jpg":
+                img = cv2.imread(path)
 
-        if img.ndim == 2:  # one channel gray image
-            img = img[..., np.newaxis]  # add channel dim
+            if img.ndim == 2:  # one channel gray image
+                img = img[..., np.newaxis]  # add channel dim
 
         return img.astype(np.float32)
 
     def load_annotations(self, image_index: int) -> np.ndarray:
-        # get ground truth annotations
-        annot_fpath = os.path.join(
-            self.ann_dir,
-            self.image_ids[image_index] + ".txt"
-        )
-        annotations = np.zeros((0, 5))
-
-        # some images appear to miss annotations
-        if not os.path.isfile(annot_fpath):
-            return annotations
-
-        # parse annotations
-        # the bbox info are normalized by original image shape (w, h)
-        # hence all [x1, y1, x2, y2] are in the range [0, 1)
-        with open(annot_fpath, 'r') as f:
-            annot = np.array(
-                [x.split() for x in f.read().strip().splitlines()],
-                dtype=np.float32
+        annot = self.annots[image_index]
+        if annot is None:
+            # get ground truth annotations
+            annot_fpath = os.path.join(
+                self.ann_dir,
+                self.image_ids[image_index] + ".txt"
             )
-            # to [x1, y1, x2, y2, class_id]
-            annot = np.roll(annot, shift=-1)
-            annot = annot.reshape((-1, 5))  # TODO
+            annot = np.zeros((0, 5))
+
+            # some images appear to miss annotations
+            if not os.path.isfile(annot_fpath):
+                return annot
+
+            # parse annotations
+            # the bbox info are normalized by original image shape (w, h)
+            # hence all [x1, y1, x2, y2] are in the range [0, 1)
+            with open(annot_fpath, 'r') as f:
+                annot = np.array(
+                    [x.split() for x in f.read().strip().splitlines()],
+                    dtype=np.float32
+                )
+                # to [x1, y1, x2, y2, class_id]
+                annot = np.roll(annot, shift=-1)
+                annot = annot.reshape((-1, 5))  # TODO
 
         return annot
 
@@ -223,10 +259,10 @@ def letterbox(image, img_size=1024):
     if height > width:
         scale = img_size / height
         resized_height = img_size
-        resized_width = int(width * scale)
+        resized_width = int(round(width * scale))
     else:
         scale = img_size / width
-        resized_height = int(height * scale)
+        resized_height = int(round(height * scale))
         resized_width = img_size
 
     if scale != 1:
@@ -240,14 +276,10 @@ def letterbox(image, img_size=1024):
 
     if image.shape[0] != img_size or image.shape[1] != img_size:
         # compute padding
-        padh = max(int((img_size - resized_height) / 2.), 0)
-        padw = max(int((img_size - resized_width) / 2.), 0)
+        padh = int((img_size - resized_height) / 2.)
+        padw = int((img_size - resized_width) / 2.)
         # put image in center (padding)
         new_image = np.zeros((img_size, img_size, channels))
-        # assert padh + resized_height <= img_size, \
-        #     f"padh: {padh}, re_h: {resized_height}"
-        # assert padw + resized_width <= img_size, \
-        #     f"padw: {padw}, re_w: {resized_width}"
         new_image[padh: padh+resized_height, padw: padw+resized_width] = image
     else:
         padh, padw = 0, 0
