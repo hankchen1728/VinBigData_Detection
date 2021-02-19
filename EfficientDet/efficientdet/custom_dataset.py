@@ -109,18 +109,22 @@ class VinBigDataset(Dataset):
         img_dir="/work/VinBigData/preprocessed/img_npz/",
         ann_dir="/work/VinBigData/preprocessed/bbox_txt/",
         img_ext="npz",  # filetype, filename extensions
+        img_size=1024,
         class_names=[],
         dset="train",
         image_ids=None,
+        img_normalizer=None,
         transform=None,
         cache_images=False
     ):
 
         self.img_dir = img_dir  # folder for storing *.npz
         self.ann_dir = ann_dir  # folder for storing *.txt
+        self.img_size = img_size
         self.set_name = dset
         self.img_ext = img_ext
         self.class_names = class_names
+        self.img_normalizer = img_normalizer
         self.transform = transform
 
         # Get the image id for current Dataset
@@ -142,12 +146,14 @@ class VinBigDataset(Dataset):
         pbar = tqdm(enumerate(annot_samples), total=self.num_imgs)
         for i, sample in pbar:
             self.annots[i] = sample
-            if len(sample) > 0:
+            if len(sample) == 0:
                 ne += 1
             pbar.desc = f"Caching labels... {ne} empty, {i+1} loaded."
 
         # Cache images for faster training
-        self.imgs = [None] * self.num_imgs
+        self.imgs = [None] * len(self)
+        self.img_hw0, self.scales = [None] * len(self), [None] * len(self)
+        self.paddings = [None] * len(self)
         if cache_images:
             img_nbytes = 0
             img_samples = ThreadPool(8).imap(
@@ -155,7 +161,11 @@ class VinBigDataset(Dataset):
             )
             pbar = tqdm(enumerate(img_samples), total=self.num_imgs)
             for i, sample in pbar:
-                self.imgs[i] = sample
+                self.imgs[i] = sample[0]
+                self.scales[i] = sample[1]
+                self.img_hw0[i] = sample[2]
+                self.paddings[i] = sample[3]
+
                 img_nbytes += self.imgs[i].nbytes
                 pbar.desc = "Caching images (%.2fGB)" % (img_nbytes / 1e9)
 
@@ -176,17 +186,23 @@ class VinBigDataset(Dataset):
         return len(self.image_ids)
 
     def __getitem__(self, idx):
-        img = self.load_image(idx)
-        annot = self.load_annotations(idx)
-        sample = {'img': img, 'annot': annot}
+        img, scale, img_hw0, padding = self.load_image(idx)
+        (h0, w0), (padh, padw) = img_hw0, padding
+        annot = self.load_annotations(idx).copy()
+
+        if annot.size > 0:
+            annot[:, [0, 2]] = annot[:, [0, 2]] * w0 * scale + padw
+            annot[:, [1, 3]] = annot[:, [1, 3]] * h0 * scale + padh
+
+        sample = {"img": img, "annot": annot, "scale": scale}
         if self.transform:
             sample = self.transform(sample)
         return sample
 
-    def load_image(self, image_index: int) -> np.ndarray:
-        img = self.imgs[image_index]
+    def load_image(self, idx: int) -> np.ndarray:
+        img = self.imgs[idx]
         if img is None:  # image not cached
-            img_fname = self.image_ids[image_index] + "." + self.img_ext
+            img_fname = self.image_ids[idx] + "." + self.img_ext
             path = os.path.join(self.img_dir, img_fname)
             # Read npz (compressed) data
             if self.img_ext == "npz":
@@ -196,17 +212,25 @@ class VinBigDataset(Dataset):
 
             if img.ndim == 2:  # one channel gray image
                 img = img[..., np.newaxis]  # add channel dim
+            h0, w0, _ = img.shape
 
-        # return img.astype(np.float32)
-        return img
+            # Normalization
+            if self.img_normalizer is not None:
+                img = self.img_normalizer(img)
 
-    def load_annotations(self, image_index: int) -> np.ndarray:
-        annot = self.annots[image_index]
+            # Resize and padding
+            img, scale, padding = letterbox(img, img_size=self.img_size)
+            return img, scale, (h0, w0), padding
+        else:
+            return img, self.scales[idx], self.img_hw0[idx], self.paddings[idx]
+
+    def load_annotations(self, idx: int) -> np.ndarray:
+        annot = self.annots[idx]
         if annot is None:
             # get ground truth annotations
             annot_fpath = os.path.join(
                 self.ann_dir,
-                self.image_ids[image_index] + ".txt"
+                self.image_ids[idx] + ".txt"
             )
             annot = np.zeros((0, 5))
 
@@ -223,7 +247,9 @@ class VinBigDataset(Dataset):
                     dtype=np.float32
                 )
                 # to [x1, y1, x2, y2, class_id]
-                annot = np.roll(annot, shift=-1)
+                # annot = annot[:, [1, 2, 3, 4, 0]]
+                if len(annot) > 0:
+                    annot = np.roll(annot, shift=-1, axis=1)
                 annot = annot.reshape((-1, 5))  # TODO
 
         return annot
@@ -234,7 +260,7 @@ def collater(data):
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
 
-    imgs = torch.from_numpy(np.stack(imgs, axis=0))
+    imgs = torch.from_numpy(np.stack(imgs, axis=0)).to(torch.float32)
 
     max_num_annots = max(annot.shape[0] for annot in annots)
 
@@ -244,7 +270,7 @@ def collater(data):
 
         for idx, annot in enumerate(annots):
             if annot.shape[0] > 0:
-                annot_padded[idx, :annot.shape[0], :] = annot
+                annot_padded[idx, :annot.shape[0], :] = torch.from_numpy(annot)
     else:
         annot_padded = torch.ones((len(annots), 1, 5)) * -1
 
@@ -288,37 +314,15 @@ def letterbox(image, img_size=1024):
     return new_image, scale, (padh, padw)
 
 
-class Resizer(object):
+class RandomHorizontalFlip(object):
     """Convert ndarrays in sample to Tensors."""
-
-    def __init__(self, img_size=512):
-        self.img_size = img_size
+    def __init__(self, prob=0.5):
+        self.prob = prob
 
     def __call__(self, sample):
-        image, annots = sample['img'], sample['annot']
-        h0, w0, _ = image.shape
-        new_image, scale, (padh, padw) = letterbox(
-            image, img_size=self.img_size
-        )
-
-        # annots[:, :4] *= self.img_size
-        if annots.size > 0:
-            annots[:, [0, 2]] = annots[:, [0, 2]] * w0 * scale + padw
-            annots[:, [1, 3]] = annots[:, [1, 3]] * h0 * scale + padh
-
-        return {
-            "img": torch.from_numpy(new_image).to(torch.float32),
-            "annot": torch.from_numpy(annots),
-            "scale": scale
-        }
-
-
-class Augmenter(object):
-    """Convert ndarrays in sample to Tensors."""
-
-    def __call__(self, sample, flip_x=0.5):
-        if np.random.rand() < flip_x:
+        if np.random.rand() < self.prob:
             image, annots = sample['img'], sample['annot']
+            scale = sample["scale"]
             image = image[:, ::-1, :]
 
             rows, cols, channels = image.shape
@@ -331,21 +335,35 @@ class Augmenter(object):
             annots[:, 0] = cols - x_max
             annots[:, 2] = cols - x_tmp
 
-            sample = {'img': image, 'annot': annots}
+            # sample["img"] = image
+            # sample["annot"] = annots
+            sample = {"img": image, "annot": annots, "scale": scale}
 
         return sample
 
 
+class ImageNormalizer(object):
+
+    def __init__(self, mean=[0], std=[1]):
+        self.mean = np.array([[mean]])
+        self.std = np.array([[std]])
+
+    def __call__(self, image):
+        return ((image.astype(np.float32) - self.mean) / self.std)
+
+
 class Normalizer(object):
+    """This will be removed at next update"""
 
     def __init__(self, mean=[0], std=[1]):
         self.mean = np.array([[mean]])
         self.std = np.array([[std]])
 
     def __call__(self, sample):
-        image, annots = sample['img'], sample['annot']
+        image, annots, scale = sample["img"], sample["annot"], sample["scale"]
 
         return {
-            'img': ((image.astype(np.float32) - self.mean) / self.std),
-            'annot': annots
+            "img": ((image.astype(np.float32) - self.mean) / self.std),
+            "annot": annots,
+            "scale": scale
         }

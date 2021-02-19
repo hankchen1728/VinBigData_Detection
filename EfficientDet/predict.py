@@ -40,9 +40,17 @@ label2color = [
 ]
 
 
-def draw_one_bbox(image, box, label, color, thickness=10):
-    alpha, alpha_box = 0.1, 0.4
-    font_scale, font_thick = 2, 3
+def draw_one_bbox(
+    image,
+    box,
+    label,
+    color,
+    thickness=10,
+    alpha_params=(0.1, 0.4),
+    font_params=(2, 3)
+):
+    alpha, alpha_box = alpha_params[0], alpha_params[1]
+    font_scale, font_thick = font_params[0], font_params[1]
     overlay_bbox = image.copy()
     overlay_text = image.copy()
     output = image.copy()
@@ -57,8 +65,8 @@ def draw_one_bbox(image, box, label, color, thickness=10):
     cv2.addWeighted(overlay_bbox, alpha, output, 1 - alpha, 0, output)
     cv2.rectangle(
         overlay_text,
-        (box[0], box[1] - 13 - text_height),
-        (box[0] + text_width + 7, box[1]),
+        (box[0], box[1] - round(13 / 2 * font_scale) - text_height),
+        (box[0] + text_width + round(7 / 2 * font_scale), box[1]),
         (0, 0, 0),
         -1
     )
@@ -91,7 +99,7 @@ def display_bboxes(img, class_ids, scores, label_names, box_rois):
         box_rois = box_rois.astype(np.int)
         for i_box, bbox in enumerate(box_rois):
             label_id = class_ids[i_box]
-            label_name = label_names[i_box]
+            label_name = label_names[label_id]
             score = scores[i_box]
             rgb_img = draw_one_bbox(
                 rgb_img,

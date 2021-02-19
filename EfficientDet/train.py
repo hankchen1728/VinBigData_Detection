@@ -1,6 +1,5 @@
-# original author: signatrix
-# adapted from https://github.com/signatrix/efficientdet/blob/master/train.py
-# modified by Zylo117
+# original author: Zylo117
+# modified by hankchen1728
 
 import os
 import json
@@ -20,9 +19,8 @@ from tqdm.autonotebook import tqdm
 from backbone import EfficientDetBackbone
 from efficientdet.custom_dataset import (
     VinBigDataset,
-    Resizer,
-    Normalizer,
-    Augmenter,
+    ImageNormalizer,
+    RandomHorizontalFlip,
     collater
 )
 from efficientdet.loss import FocalLoss
@@ -236,12 +234,10 @@ def train(opt):
         ann_dir=params.annot_dir,
         image_ids=train_val_split["train"],
         dset="train",
+        img_size=input_sizes[opt.compound_coef],
+        img_normalizer=ImageNormalizer(mean=params.mean, std=params.std),
         cache_images=opt.cache,
-        transform=transforms.Compose([
-            Normalizer(mean=params.mean, std=params.std),
-            Augmenter(),
-            Resizer(input_sizes[opt.compound_coef])
-        ])
+        transform=transforms.Compose([RandomHorizontalFlip(prob=0.5)])
     )
     training_generator = DataLoader(training_set, **training_params)
 
@@ -249,12 +245,11 @@ def train(opt):
         img_dir=params.image_dir,
         ann_dir=params.annot_dir,
         image_ids=train_val_split["val"],
+        img_size=input_sizes[opt.compound_coef],
+        img_normalizer=ImageNormalizer(mean=params.mean, std=params.std),
         dset="val",
         cache_images=opt.cache,
-        transform=transforms.Compose([
-            Normalizer(mean=params.mean, std=params.std),
-            Resizer(input_sizes[opt.compound_coef])
-        ])
+        # transform=transforms.Compose([])
     )
     val_generator = DataLoader(val_set, **val_params)
 
