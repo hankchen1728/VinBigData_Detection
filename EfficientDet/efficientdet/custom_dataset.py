@@ -71,6 +71,9 @@ class VinBigDicomDataset(Dataset):
 
         if self.transform:
             img = self.transform(img)
+
+        # To channel first
+        img = torch.from_numpy(img).to(torch.float32).permute(2, 0, 1)
         return {
             "img": img,
             "orig": orig_img,
@@ -90,10 +93,9 @@ def infer_collater(data):
     scales = [s["scale"] for s in data]
     paddings = [s["padding"] for s in data]
 
-    imgs = torch.from_numpy(np.stack(imgs, axis=0)).to(torch.float32)
+    imgs = torch.stack(imgs)
 
     # tensor to channel first format
-    imgs = imgs.permute(0, 3, 1, 2)
     return {
         "img": imgs,
         "orig": orig_imgs,
@@ -101,6 +103,10 @@ def infer_collater(data):
         "scale": scales,
         "padding": paddings
     }
+
+
+def zip_collater(data):
+    return tuple(zip(*data))
 
 
 class VinBigDataset(Dataset):
@@ -194,9 +200,11 @@ class VinBigDataset(Dataset):
             annot[:, [0, 2]] = annot[:, [0, 2]] * w0 * scale + padw
             annot[:, [1, 3]] = annot[:, [1, 3]] * h0 * scale + padh
 
-        sample = {"img": img, "annot": annot, "scale": scale}
+        sample = {"img": img, "annot": annot}
         if self.transform:
             sample = self.transform(sample)
+
+        sample["scale"] = scale
         return sample
 
     def load_image(self, idx: int) -> np.ndarray:
@@ -260,7 +268,9 @@ def collater(data):
     annots = [s['annot'] for s in data]
     scales = [s['scale'] for s in data]
 
-    imgs = torch.from_numpy(np.stack(imgs, axis=0)).to(torch.float32)
+    # imgs = torch.from_numpy(np.stack(imgs, axis=0)).to(torch.float32)
+    # tensor to channel first format
+    imgs = torch.stack(imgs).permute(0, 3, 1, 2)
 
     max_num_annots = max(annot.shape[0] for annot in annots)
 
@@ -273,9 +283,6 @@ def collater(data):
                 annot_padded[idx, :annot.shape[0], :] = torch.from_numpy(annot)
     else:
         annot_padded = torch.ones((len(annots), 1, 5)) * -1
-
-    # tensor to channel first format
-    imgs = imgs.permute(0, 3, 1, 2)
 
     return {'img': imgs, 'annot': annot_padded, 'scale': scales}
 
@@ -350,20 +357,3 @@ class ImageNormalizer(object):
 
     def __call__(self, image):
         return ((image.astype(np.float32) - self.mean) / self.std)
-
-
-class Normalizer(object):
-    """This will be removed at next update"""
-
-    def __init__(self, mean=[0], std=[1]):
-        self.mean = np.array([[mean]])
-        self.std = np.array([[std]])
-
-    def __call__(self, sample):
-        image, annots, scale = sample["img"], sample["annot"], sample["scale"]
-
-        return {
-            "img": ((image.astype(np.float32) - self.mean) / self.std),
-            "annot": annots,
-            "scale": scale
-        }

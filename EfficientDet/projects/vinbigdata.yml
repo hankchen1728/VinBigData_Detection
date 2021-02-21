@@ -1,7 +1,6 @@
-project_name: vinbigdata  # also the folder name of the dataset that under data_path folder
+project_name: vinbigdata
 image_dir: /work/VinBigData/preprocessed/img_npz
 annot_dir: /work/VinBigData/preprocessed/bbox_txt
-# test_dicom: /work/VinBigData/raw_data/few_train
 test_dicom: /work/VinBigData/raw_data/test
 train_val_split: /work/VinBigData/preprocessed/split_info/5-fold_k-0.json
 

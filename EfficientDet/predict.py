@@ -14,9 +14,14 @@ from torch.utils.data import DataLoader
 # from tqdm.autonotebook import tqdm
 
 from backbone import EfficientDetBackbone
-from efficientdet.custom_dataset import VinBigDicomDataset, infer_collater
+from efficientdet.custom_dataset import VinBigDicomDataset, infer_collater, zip_collater
 from efficientdet.utils import BBoxTransform, ClipBoxes
-from utils.utils import CustomDataParallel, init_weights, postprocess
+from utils.utils import (
+    CustomDataParallel,
+    init_weights,
+    postprocess,
+    intersect_dicts
+)
 
 
 input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
@@ -99,7 +104,7 @@ def display_bboxes(img, class_ids, scores, label_names, box_rois):
         box_rois = box_rois.astype(np.int)
         for i_box, bbox in enumerate(box_rois):
             label_id = class_ids[i_box]
-            label_name = label_names[label_id]
+            label_name = label_names[i_box]
             score = scores[i_box]
             rgb_img = draw_one_bbox(
                 rgb_img,
@@ -239,11 +244,6 @@ def predict(opt):
         torch.manual_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # opt.saved_path = opt.saved_path + f'/{params.project_name}/'
-    # opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
-    # os.makedirs(opt.log_path, exist_ok=True)
-    # os.makedirs(opt.saved_path, exist_ok=True)
-    #
     if opt.visualization:
         os.makedirs(opt.visual_path, exist_ok=True)
 
@@ -253,7 +253,7 @@ def predict(opt):
         'shuffle': False,
         'drop_last': False,
         'num_workers': opt.num_workers,
-        "collate_fn": infer_collater
+        "collate_fn": infer_collater,
     }
 
     testing_set = VinBigDicomDataset(
@@ -271,7 +271,7 @@ def predict(opt):
         scales=eval(params.anchors_scales)
     )
 
-    # TODO: can we given specific score-threshold for each class
+    # TODO: can we give specific score-threshold for each class
     threshold = opt.score_thres
     iou_threshold = opt.iou_thres
 
@@ -281,7 +281,12 @@ def predict(opt):
         weights_path = opt.load_weights
 
         try:
-            model.load_state_dict(torch.load(weights_path), strict=True)
+            # model.load_state_dict(torch.load(weights_path), strict=True)
+            state_dict = torch.load(weights_path)
+            ns = len(state_dict)
+            state_dict = intersect_dicts(state_dict, model.state_dict())
+            nl = len(state_dict)
+            model.load_state_dict(state_dict, strict=True)
         except RuntimeError as e:
             print(f'[Warning] Ignoring {e}')
             print(
@@ -291,13 +296,18 @@ def predict(opt):
                 "should be loaded already."
             )
 
-        print(f"[Info] loaded weights: {os.path.basename(weights_path)}")
+        print(f"[Info] loaded weights: {ns} of {nl} states in "
+              f"{os.path.basename(weights_path)} are loaded.")
     else:
         print('[Info] initializing weights...')
         init_weights(model)
 
+    model.requires_grad_(False)
+    model.eval()
+
     # Mapping model to gpu device
     # TODO: Handling "half-precision" case (float16)
+    print(f"[Info] Mapping model to device \"{device}\"")
     if num_gpus > 0:
         model = model.cuda()
         if num_gpus > 1:
@@ -306,20 +316,24 @@ def predict(opt):
             # which size is smaller than given `batch_size`
             model = CustomDataParallel(model, num_gpus)
 
-    model.eval()
-
     regressBoxes = BBoxTransform()
     clipBoxes = ClipBoxes()
     predictions = []
     num_iters = len(test_dataloader)
     obj_list = params.obj_list
-    for i_batch, data in tqdm(enumerate(test_dataloader), total=num_iters):
-        with torch.no_grad():
+    with torch.no_grad():
+        for i_batch, data in tqdm(enumerate(test_dataloader), total=num_iters):
+            # print("Iteration start")
             imgs = data["img"].to(device)
             orig_imgs = data["orig"]
             img_ids = data["id"]
             scales = data["scale"]
             paddings = data["padding"]
+
+            # (imgs, orig_imgs, img_ids, scales, paddings) = data
+            # imgs = torch.stack(imgs).to(device)
+
+            # print("Model Inference...")
             _, regression, classification, anchors = model(imgs)
             # print("Running postprocessing")
             out = postprocess(
@@ -332,6 +346,7 @@ def predict(opt):
                 threshold,
                 iou_threshold
             )
+            # print("End running postprocessing")
             out = invert_affine(out, scales, paddings)
 
             # Convert to PredictionString format
