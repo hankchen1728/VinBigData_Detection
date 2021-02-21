@@ -13,7 +13,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision import transforms
+# from torchvision import transforms
 from tqdm.autonotebook import tqdm
 
 from backbone import EfficientDetBackbone
@@ -374,6 +374,7 @@ def train(opt):
                 continue
 
             epoch_loss = []
+            print(("%10s" * 5) % ("Step", "Epoch", "Cls loss", "Reg loss", "Total loss"))
             progress_bar = tqdm(training_generator)
             for iter, data in enumerate(progress_bar):
                 if iter < step - last_epoch * num_iter_per_epoch:
@@ -408,10 +409,18 @@ def train(opt):
 
                     epoch_loss.append(float(loss))
 
-                    progress_bar.set_description(
-                        'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
-                            step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
-                            reg_loss.item(), loss.item()))
+                    # progress_bar.set_description(
+                    #     'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
+                    #         step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
+                    #         reg_loss.item(), loss.item()))
+                    s = ('%10s' * 2 + '%10.5g' * 3) % (
+                        step, '%g/%g' % (epoch+1, opt.num_epochs),
+                        cls_loss.item(),
+                        reg_loss.item(),
+                        loss.item()
+                    )
+                    progress_bar.set_description(s)
+
                     writer.add_scalars('Loss', {'train': loss}, step)
                     writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
                     writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
@@ -464,10 +473,16 @@ def train(opt):
                 reg_loss = np.mean(loss_regression_ls)
                 loss = cls_loss + reg_loss
 
-                print(
-                    "Val. Epoch: {}/{}. Classification loss: {:1.5f}. "
-                    "Regression loss: {:1.5f}. Total loss: {:1.5f}".format(
-                        epoch, opt.num_epochs, cls_loss, reg_loss, loss))
+                val_info = ('%10s' * 2 + '%10.5g' * 3) % (
+                    "Val.", '%g/%g' % (epoch+1, opt.num_epochs),
+                    cls_loss, reg_loss, loss,
+                )
+                print(val_info)
+
+                # print(
+                #     "Val. Epoch: {}/{}. Classification loss: {:1.5f}. "
+                #     "Regression loss: {:1.5f}. Total loss: {:1.5f}".format(
+                #         epoch, opt.num_epochs, cls_loss, reg_loss, loss))
                 writer.add_scalars('Loss', {'val': loss}, step)
                 writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
                 writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
