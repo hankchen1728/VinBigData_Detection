@@ -200,12 +200,26 @@ class VinBigDataset(Dataset):
             annot[:, [0, 2]] = annot[:, [0, 2]] * w0 * scale + padw
             annot[:, [1, 3]] = annot[:, [1, 3]] * h0 * scale + padh
 
-        sample = {"img": img, "annot": annot}
+        # sample = {"img": img, "annot": annot}
+        sample = {"image": img, "bboxes": annot[:, :4], "labels": annot[:, 4]}
         if self.transform:
-            sample = self.transform(sample)
+            sample = self.transform(**sample)
 
-        sample["scale"] = scale
-        return sample
+        # Merge bboxes and labels to annots
+        if len(sample["bboxes"]) > 0:
+            annot = np.hstack([
+                sample["bboxes"],
+                np.expand_dims(sample["labels"], -1)
+            ])
+        else:
+            annot = np.zeros((0, 5), dtype=np.float32)
+
+        img = sample["image"]
+        # Normalization
+        if self.img_normalizer is not None:
+            img = self.img_normalizer(img)
+
+        return {"img": img, "annot": annot, "scale": scale}
 
     def load_image(self, idx: int) -> np.ndarray:
         img = self.imgs[idx]
@@ -223,8 +237,8 @@ class VinBigDataset(Dataset):
             h0, w0, _ = img.shape
 
             # Normalization
-            if self.img_normalizer is not None:
-                img = self.img_normalizer(img)
+            # if self.img_normalizer is not None:
+            #     img = self.img_normalizer(img)
 
             # Resize and padding
             img, scale, padding = letterbox(img, img_size=self.img_size)
@@ -287,7 +301,7 @@ def collater(data):
     return {'img': imgs, 'annot': annot_padded, 'scale': scales}
 
 
-def letterbox(image, img_size=1024):
+def letterbox(image, img_size=1024, pad_color=0):
     # TODO: use `cv2.copyMakeBorder` to do padding
     height, width, channels = image.shape
     if height > width:
@@ -313,16 +327,28 @@ def letterbox(image, img_size=1024):
         padh = int((img_size - resized_height) / 2.)
         padw = int((img_size - resized_width) / 2.)
         # put image in center (padding)
-        new_image = np.zeros((img_size, img_size, channels))
-        new_image[padh: padh+resized_height, padw: padw+resized_width] = image
+        image = cv2.copyMakeBorder(
+            image,
+            padh,  # top
+            img_size - resized_height - padh,  # bottom
+            padw,  # left
+            img_size - resized_width - padw,  # right
+            cv2.BORDER_CONSTANT,
+            value=pad_color
+        )
+        if image.ndim == 2:  # grayscale image
+            image = image[..., np.newaxis]
+        # new_image = np.zeros((img_size, img_size, channels), dtype=np.uint8)
+        # new_image[padh: padh+resized_height, padw: padw+resized_width] = image
     else:
         padh, padw = 0, 0
-        new_image = image
-    return new_image, scale, (padh, padw)
+        # new_image = image
+    return image, scale, (padh, padw)
 
 
 class RandomHorizontalFlip(object):
     """Convert ndarrays in sample to Tensors."""
+    # This will be removed at next version
     def __init__(self, prob=0.5):
         self.prob = prob
 

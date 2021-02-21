@@ -8,8 +8,33 @@ train_val_split: /work/VinBigData/preprocessed/split_info/5-fold_k-0.json
 mean: [0]
 std: [255.]
 
+# Augmentation config
+train_aug:
+  HorizontalFlip:
+  - p: 0.5
+  VerticalFlip:
+  - p: 0.1
+  CLAHE:
+    clip_limit: !!python/tuple [1, 2.0]
+    tile_grid_size: !!python/tuple [5, 5]
+    p: 0.2
+  ShiftScaleRotate:
+  - shift_limit: 0.1  # shift factor range for both height and width
+    scale_limit: !!python/tuple [-0.1, 0.1]  # scaling factor range
+    rotate_limit: 7.5  # in degree
+    border_mode: 0    # cv2.BORDER_CONSTANT
+    value: 0  # padding value if border_mode is cv2.BORDER_CONSTANT
+    p: 0.5
+  Cutout:
+  - num_holes: 4
+    max_h_size: 64
+    max_w_size: 64
+    fill_value: 0
+    p: 0.2
+
 # About model
 in_channels: 1
+
 # this is coco anchors, change it if necessary
 anchors_scales: '[2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]'
 anchors_ratios: '[(1.0, 1.0), (1.4, 0.7), (0.7, 1.4)]'

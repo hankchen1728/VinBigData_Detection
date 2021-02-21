@@ -20,9 +20,9 @@ from backbone import EfficientDetBackbone
 from efficientdet.custom_dataset import (
     VinBigDataset,
     ImageNormalizer,
-    RandomHorizontalFlip,
     collater
 )
+from efficientdet.det_aug import get_train_transforms
 from efficientdet.loss import FocalLoss
 from utils.sync_batchnorm import patch_replication_callback
 from utils.utils import (
@@ -37,7 +37,12 @@ from utils.utils import (
 
 class Params:
     def __init__(self, project_file):
-        self.params = yaml.safe_load(open(project_file).read())
+        # Use yaml.FullLoader for loading python specific object
+        # Such as List, Tuple, etc.
+        self.params = yaml.load(
+            open(project_file).read(),
+            Loader=yaml.FullLoader
+        )
 
     def __getattr__(self, item):
         return self.params.get(item, None)
@@ -237,7 +242,7 @@ def train(opt):
         img_size=input_sizes[opt.compound_coef],
         img_normalizer=ImageNormalizer(mean=params.mean, std=params.std),
         cache_images=opt.cache,
-        transform=transforms.Compose([RandomHorizontalFlip(prob=0.5)])
+        transform=get_train_transforms(params["train_aug"])
     )
     training_generator = DataLoader(training_set, **training_params)
 
@@ -280,7 +285,7 @@ def train(opt):
             ns = len(state_dict)
             state_dict = intersect_dicts(state_dict, model.state_dict())
             nl = len(state_dict)
-            ret = model.load_state_dict(state_dict, strict=True)
+            model.load_state_dict(state_dict, strict=True)
         except RuntimeError as e:
             print(f'[Warning] Ignoring {e}')
             print(
@@ -418,7 +423,7 @@ def train(opt):
                     step += 1
 
                     if step % opt.save_interval == 0 and step > 0:
-                        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
+                        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch:03}_{step}.pth')
                         print('checkpoint...')
 
                 except Exception as e:
@@ -471,7 +476,7 @@ def train(opt):
                     best_loss = loss
                     best_epoch = epoch
 
-                    save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
+                    save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch:03}_{step}.pth')
 
                 model.train()
 
@@ -480,7 +485,7 @@ def train(opt):
                     print('[Info] Stop training at epoch {}. The lowest loss achieved is {}'.format(epoch, best_loss))
                     break
     except KeyboardInterrupt:
-        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
+        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch:03}_{step}.pth')
         writer.close()
     writer.close()
 
