@@ -242,7 +242,7 @@ def train(opt):
         img_size=input_sizes[opt.compound_coef],
         img_normalizer=ImageNormalizer(mean=params.mean, std=params.std),
         cache_images=opt.cache,
-        transform=get_train_transforms(params["train_aug"])
+        transform=get_train_transforms(params.train_aug)
     )
     training_generator = DataLoader(training_set, **training_params)
 
@@ -374,7 +374,7 @@ def train(opt):
                 continue
 
             epoch_loss = []
-            print(("%10s" * 5) % ("Step", "Epoch", "Cls loss", "Reg loss", "Total loss"))
+            print(("%10s" * 5) % ("Step", "Epoch", "Cls loss", "Reg loss", "Tot. loss"))
             progress_bar = tqdm(training_generator)
             for iter, data in enumerate(progress_bar):
                 if iter < step - last_epoch * num_iter_per_epoch:
@@ -413,7 +413,7 @@ def train(opt):
                     #     'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
                     #         step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
                     #         reg_loss.item(), loss.item()))
-                    s = ('%10s' * 2 + '%10.5g' * 3) % (
+                    s = ('%10s' * 2 + '%10.5f' * 3) % (
                         step, '%g/%g' % (epoch+1, opt.num_epochs),
                         cls_loss.item(),
                         reg_loss.item(),
@@ -473,7 +473,7 @@ def train(opt):
                 reg_loss = np.mean(loss_regression_ls)
                 loss = cls_loss + reg_loss
 
-                val_info = ('%10s' * 2 + '%10.5g' * 3) % (
+                val_info = ('%10s' * 2 + '%10.5f' * 3) % (
                     "Val.", '%g/%g' % (epoch+1, opt.num_epochs),
                     cls_loss, reg_loss, loss,
                 )

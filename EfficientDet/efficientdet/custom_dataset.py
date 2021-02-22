@@ -197,8 +197,8 @@ class VinBigDataset(Dataset):
         annot = self.load_annotations(idx).copy()
 
         if annot.size > 0:
-            annot[:, [0, 2]] = annot[:, [0, 2]] * w0 * scale + padw
-            annot[:, [1, 3]] = annot[:, [1, 3]] * h0 * scale + padh
+            annot[:, [0, 2]] = annot[:, [0, 2]] * round(w0 * scale) + padw
+            annot[:, [1, 3]] = annot[:, [1, 3]] * round(h0 * scale) + padh
 
         # sample = {"img": img, "annot": annot}
         sample = {"image": img, "bboxes": annot[:, :4], "labels": annot[:, 4]}
@@ -219,7 +219,13 @@ class VinBigDataset(Dataset):
         if self.img_normalizer is not None:
             img = self.img_normalizer(img)
 
-        return {"img": img, "annot": annot, "scale": scale}
+        # To torch tensor
+        img = torch.from_numpy(img).to(torch.float32)
+        return {
+            "img": img,
+            "annot": annot,
+            "scale": scale
+        }
 
     def load_image(self, idx: int) -> np.ndarray:
         img = self.imgs[idx]
