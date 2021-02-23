@@ -116,12 +116,17 @@ def postprocess(
         transformed_anchors_per = transformed_anchors[i, scores_over_thresh[i, :], ...]
         scores_per = scores[i, scores_over_thresh[i, :], ...]
         scores_, classes_ = classification_per.max(dim=0)
-        anchors_nms_idx = batched_nms(
-            transformed_anchors_per,
-            scores_per[:, 0],
-            classes_,
-            iou_threshold=iou_threshold
-        )
+        if iou_threshold > 0:
+            anchors_nms_idx = batched_nms(
+                transformed_anchors_per,
+                scores_per[:, 0],
+                classes_,
+                iou_threshold=iou_threshold
+            )
+        else:
+            anchors_nms_idx = torch.arange(
+                transformed_anchors_per.shape[0]
+            ).to(transformed_anchors.device)
 
         if anchors_nms_idx.shape[0] != 0:
             classes_ = classes_[anchors_nms_idx]

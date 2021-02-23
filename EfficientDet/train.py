@@ -285,7 +285,7 @@ def train(opt):
             ns = len(state_dict)
             state_dict = intersect_dicts(state_dict, model.state_dict())
             nl = len(state_dict)
-            model.load_state_dict(state_dict, strict=True)
+            model.load_state_dict(state_dict, strict=False)
         except RuntimeError as e:
             print(f'[Warning] Ignoring {e}')
             print(
@@ -295,7 +295,7 @@ def train(opt):
                 "should be loaded already."
             )
 
-        print(f"[Info] loaded weights: , {ns} of {nl} states in "
+        print(f"[Info] loaded weights: , {nl} of {ns} states in "
               f"{os.path.basename(weights_path)} are loaded, "
               f"resuming checkpoint from step: {last_step}")
     else:

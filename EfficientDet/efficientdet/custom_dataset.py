@@ -62,12 +62,15 @@ class VinBigDicomDataset(Dataset):
             normalization=True,
             apply_window=True
         )
+        # To uint8 to acculerate the resize
+        orig_img = (orig_img * 255).astype(np.uint8)
         if orig_img.ndim == 2:
             orig_img = orig_img[..., np.newaxis]  # add channel dim
         # h0, w0, _ = img.shape
 
         # Resize and padding
         img, scale, padding = letterbox(orig_img, img_size=self.img_size)
+        img = (img / 255).astype(np.float32)
 
         if self.transform:
             img = self.transform(img)
@@ -345,7 +348,10 @@ def letterbox(image, img_size=1024, pad_color=0):
         if image.ndim == 2:  # grayscale image
             image = image[..., np.newaxis]
         # new_image = np.zeros((img_size, img_size, channels), dtype=np.uint8)
-        # new_image[padh: padh+resized_height, padw: padw+resized_width] = image
+        # new_image[
+        #     padh: padh+resized_height,
+        #     padw: padw+resized_width
+        # ] = image
     else:
         padh, padw = 0, 0
         # new_image = image

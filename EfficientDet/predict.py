@@ -98,7 +98,8 @@ def draw_one_bbox(
 
 def display_bboxes(img, class_ids, scores, label_names, box_rois):
     # to uint8
-    img = (img * 255.).astype(np.uint8)
+    if img.dtype != np.uint8:
+        img = (img * 255.).astype(np.uint8)
     rgb_img = np.repeat(img[..., [0]], axis=-1, repeats=3)
     if len(box_rois) > 0:
         box_rois = box_rois.astype(np.int)
@@ -118,7 +119,12 @@ def display_bboxes(img, class_ids, scores, label_names, box_rois):
 
 class Params:
     def __init__(self, project_file):
-        self.params = yaml.safe_load(open(project_file).read())
+        # Use yaml.FullLoader for loading python specific object
+        # Such as List, Tuple, etc.
+        self.params = yaml.load(
+            open(project_file).read(),
+            Loader=yaml.FullLoader
+        )
 
     def __getattr__(self, item):
         return self.params.get(item, None)
